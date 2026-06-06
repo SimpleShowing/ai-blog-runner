@@ -138,7 +138,7 @@ export default function TopicDetail() {
     return (
       <div className="text-center py-16">
         <p className="text-foreground">Topic not found</p>
-        <Link href="/topics"><Button className="mt-4">Back to Topics</Button></Link>
+        <Button className="mt-4" asChild><Link href="/topics">Back to Topics</Link></Button>
       </div>
     );
   }
@@ -182,11 +182,11 @@ export default function TopicDetail() {
               </Button>
             )}
             {hasDrafts && (
-              <Link href={`/drafts/${drafts![0].id}`}>
-                <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/drafts/${drafts![0].id}`}>
                   <FileText className="w-3.5 h-3.5 mr-1.5" /> View Draft
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             )}
           </div>
         </div>

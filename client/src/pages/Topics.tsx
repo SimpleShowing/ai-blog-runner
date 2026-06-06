@@ -211,11 +211,11 @@ export default function Topics() {
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-1">
-                      <Link href={`/topics/${topic.id}`}>
-                        <Button variant="ghost" size="sm" className="h-7 px-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button variant="ghost" size="sm" className="h-7 px-2 opacity-0 group-hover:opacity-100 transition-opacity" asChild>
+                        <Link href={`/topics/${topic.id}`}>
                           <ArrowRight className="w-3.5 h-3.5" />
-                        </Button>
-                      </Link>
+                        </Link>
+                      </Button>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="sm" className="h-7 px-2">

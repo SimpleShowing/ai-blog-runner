@@ -120,7 +120,7 @@ export default function DraftDetail() {
     return (
       <div className="text-center py-16">
         <p className="text-muted-foreground">Draft not found</p>
-        <Link href="/drafts"><Button className="mt-4">Back to Drafts</Button></Link>
+        <Button className="mt-4" asChild><Link href="/drafts">Back to Drafts</Link></Button>
       </div>
     );
   }

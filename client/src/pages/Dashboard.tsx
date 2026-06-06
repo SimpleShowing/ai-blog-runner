@@ -122,9 +122,9 @@ export default function Dashboard() {
             <div className="text-center py-8">
               <ListChecks className="w-8 h-8 mx-auto mb-2" style={{ color: "var(--muted-foreground)" }} />
               <p className="text-sm" style={{ color: "var(--muted-foreground)" }}>No topics yet</p>
-              <Link href="/topics">
-                <Button size="sm" className="mt-3">Add your first topic</Button>
-              </Link>
+              <Button size="sm" className="mt-3" asChild>
+                <Link href="/topics">Add your first topic</Link>
+              </Button>
             </div>
           ) : (
             <div className="space-y-2">
