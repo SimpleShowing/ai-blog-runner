@@ -64,7 +64,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   if (user.role !== undefined) {
     values.role = user.role;
     updateSet.role = user.role;
-  } else if (user.openId === ENV.ownerOpenId) {
+  } else if (user.openId === ENV.ownerOpenId || (user.email && isAdminEmail(user.email))) {
     values.role = "admin";
     updateSet.role = "admin";
   }
@@ -107,8 +107,18 @@ export async function removeEditor(id: number) {
   await db.update(invitedEditors).set({ isActive: false }).where(eq(invitedEditors.id, id));
 }
 
+// Emails and domains that always have admin access (no invite required).
+const ADMIN_EMAILS = new Set(["fredmcgill@gmail.com", "fred@simpleshowing.com"]);
+function isAdminEmail(email: string): boolean {
+  const lower = email.toLowerCase();
+  return ADMIN_EMAILS.has(lower) || lower.endsWith("@simpleshowing.com");
+}
+
 export async function isEmailAllowed(email: string, openId: string): Promise<boolean> {
+  // Owner by openId (Manus auth)
   if (openId === ENV.ownerOpenId) return true;
+  // Admin emails + entire @simpleshowing.com domain
+  if (email && isAdminEmail(email)) return true;
   const db = await getDb();
   if (!db) return false;
   const result = await db
