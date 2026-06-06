@@ -342,3 +342,168 @@ describe("editors router", () => {
     expect(Array.isArray(result)).toBe(true);
   });
 });
+
+// ─── stripLeadingH1 helper (tested via wordpress.push) ───────────────────────
+
+describe("stripLeadingH1 (via wordpress.push content)", () => {
+  // Local copy of the helper for unit testing
+  function stripLeadingH1(content: string): string {
+    let c = content.replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i, "");
+    c = c.replace(/^\s*#(?!#)[^\n]*\n?/, "");
+    return c.trim();
+  }
+
+  it("strips a plain HTML <h1> at the start", () => {
+    expect(stripLeadingH1("<h1>My Title</h1>\n<p>Body</p>")).toBe("<p>Body</p>");
+  });
+
+  it("strips a markdown # heading at the start", () => {
+    expect(stripLeadingH1("# My Title\nBody text")).toBe("Body text");
+  });
+
+  it("does NOT strip ## or ### headings", () => {
+    const input = "## Section\nBody text";
+    expect(stripLeadingH1(input)).toBe(input);
+  });
+
+  it("does NOT strip an <h1> that is not at the start", () => {
+    const input = "<p>Intro</p>\n<h1>Title</h1>\n<p>Body</p>";
+    expect(stripLeadingH1(input)).toBe(input);
+  });
+
+  it("strips leading whitespace before the h1", () => {
+    expect(stripLeadingH1("  <h1>Title</h1>\n<p>Body</p>")).toBe("<p>Body</p>");
+  });
+
+  it("returns empty string when content is only an h1", () => {
+    expect(stripLeadingH1("<h1>Only Title</h1>")).toBe("");
+  });
+
+  it("handles multi-line h1 content", () => {
+    expect(stripLeadingH1("<h1>\n  Title\n</h1>\n<p>Body</p>")).toBe("<p>Body</p>");
+  });
+
+  it("strips <H1> (uppercase tag)", () => {
+    expect(stripLeadingH1("<H1>Title</H1>\n<p>Body</p>")).toBe("<p>Body</p>");
+  });
+});
+
+// ─── Top-level mocks for WP push tests (hoisted before appRouter import) ─────
+
+vi.mock("./_core/imageGeneration", () => ({
+  generateImage: vi.fn(async () => ({ url: "/manus-storage/generated/test_abc.png" })),
+}));
+vi.mock("./storage", () => ({
+  storagePut: vi.fn(async () => ({ key: "test_key", url: "/manus-storage/test_key" })),
+  storageGet: vi.fn(async () => ({ key: "test_key", url: "/manus-storage/test_key" })),
+  storageGetSignedUrl: vi.fn(async () => "https://s3.example.com/img.png"),
+}));
+
+// ─── wordpress.push: notification includes WP URL ────────────────────────────
+
+// Top-level imports for WP push describe block (top-level await is allowed here)
+const _wpPushDbMod = await import("./db");
+const _wpPushNotifMod = await import("./_core/notification");
+const _wpPushLlmMod = await import("./_core/llm");
+const _wpPushImgMod = await import("./_core/imageGeneration");
+
+describe("wordpress.push", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    // Restore getSetting mock
+    (_wpPushDbMod.getSetting as ReturnType<typeof vi.fn>).mockImplementation(async (key: string) => {
+      const store: Record<string, string> = {
+        wp_url: "https://www.simpleshowing.com",
+        wp_username: "content-agent",
+        wp_app_password: "secret-password",
+      };
+      return store[key] ?? null;
+    });
+    // Restore getDraftById mock with approved status
+    (_wpPushDbMod.getDraftById as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 55,
+      topicId: 1,
+      title: "Georgia HEAR Program Guide",
+      content: "<h1>Georgia HEAR Program Guide</h1><p>Body content here.</p>",
+      excerpt: "Learn about the Georgia HEAR program for home energy upgrades.",
+      seoTitle: "Georgia HEAR Program | SimpleShowing",
+      metaDescription: "Everything you need to know about the Georgia HEAR program.",
+      focusKeyword: "georgia hear program",
+      canonicalUrl: "/blog/georgia-hear-program",
+      status: "approved",
+    });
+    // Restore invokeLLM to return category suggestions
+    (_wpPushLlmMod.invokeLLM as ReturnType<typeof vi.fn>).mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({ categories: ["Electrical", "Home Improvement"] }) } }],
+    });
+    // Restore imageGeneration mock
+    (_wpPushImgMod.generateImage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      url: "/manus-storage/generated/test_abc.png",
+    });
+  });
+
+  it("strips the leading H1 from content before pushing to WordPress", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+
+    let capturedBody: Record<string, unknown> | undefined;
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn(async (url: string | URL | Request, opts?: RequestInit) => {
+      const urlStr = String(url);
+      if (urlStr.includes("s3.example.com")) {
+        return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) } as Response;
+      }
+      if (urlStr.includes("/wp-json/wp/v2/categories")) {
+        return { ok: true, json: async () => [] } as Response;
+      }
+      if (urlStr.includes("/wp-json/wp/v2/media")) {
+        return { ok: true, json: async () => ({ id: 999 }) } as Response;
+      }
+      if (urlStr.includes("/wp-json/wp/v2/posts")) {
+        capturedBody = JSON.parse((opts?.body as string) || "{}");
+        return { ok: true, json: async () => ({ id: 13509, link: "https://www.simpleshowing.com/?p=13509" }) } as Response;
+      }
+      return { ok: false, json: async () => ({}), text: async () => "" } as Response;
+    }) as unknown as typeof fetch;
+
+    try {
+      await caller.wordpress.push({ draftId: 55, topicId: 1, wpPostStatus: "draft" });
+      expect(capturedBody?.content).toBeDefined();
+      expect(String(capturedBody?.content)).not.toMatch(/^<h1/i);
+      expect(String(capturedBody?.content)).toContain("<p>Body content here.</p>");
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it("includes the live WP post URL in the owner notification", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn(async (url: string | URL | Request, opts?: RequestInit) => {
+      const urlStr = String(url);
+      if (urlStr.includes("s3.example.com")) {
+        return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) } as Response;
+      }
+      if (urlStr.includes("/wp-json/wp/v2/categories")) {
+        return { ok: true, json: async () => [] } as Response;
+      }
+      if (urlStr.includes("/wp-json/wp/v2/media")) {
+        return { ok: true, json: async () => ({ id: 999 }) } as Response;
+      }
+      if (urlStr.includes("/wp-json/wp/v2/posts")) {
+        return { ok: true, json: async () => ({ id: 13509, link: "https://www.simpleshowing.com/?p=13509" }) } as Response;
+      }
+      return { ok: false, json: async () => ({}), text: async () => "" } as Response;
+    }) as unknown as typeof fetch;
+
+    try {
+      await caller.wordpress.push({ draftId: 55, topicId: 1, wpPostStatus: "draft" });
+      expect(_wpPushNotifMod.notifyOwner).toHaveBeenCalledWith(expect.objectContaining({
+        title: "Post Published to WordPress",
+        content: expect.stringContaining("https://www.simpleshowing.com/?p=13509"),
+      }));
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+});

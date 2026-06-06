@@ -18,6 +18,8 @@ import {
   getAllUsers,
 } from "./db";
 import { ENV } from "./_core/env";
+import { generateImage } from "./_core/imageGeneration";
+import { storageGetSignedUrl } from "./storage";
 
 // ─── Admin guard ──────────────────────────────────────────────────────────────
 
@@ -37,6 +39,144 @@ async function getBrandContext() {
     forbiddenClaims: s["forbidden_claims"] || "Guaranteed sale, Lowest price guaranteed",
     styleGuide: s["style_guide"] || "Use second-person (you/your). Avoid jargon. Include real numbers and examples. Always link to relevant SimpleShowing pages.",
   };
+}
+
+// ─── WP Push Helpers ─────────────────────────────────────────────────────────
+
+/** Remove a leading H1 heading from content so the WP post title doesn't appear twice. */
+function stripLeadingH1(content: string): string {
+  // Strip HTML <h1>...</h1> at start (case-insensitive, dotAll via [\s\S])
+  let c = content.replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i, "");
+  // Strip Markdown # heading at start (single # only, not ## or ###)
+  c = c.replace(/^\s*#(?!#)[^\n]*\n?/, "");
+  return c.trim();
+}
+
+/**
+ * Ask the LLM to suggest 1-3 WordPress category names for the article.
+ * Returns an array of lowercase category name strings.
+ */
+async function suggestWpCategories(title: string, excerpt: string): Promise<string[]> {
+  try {
+    const resp = await invokeLLM({
+      messages: [
+        {
+          role: "system",
+          content: "You are a WordPress content categorisation assistant. Given a blog post title and excerpt, return a JSON array of 1 to 3 short, specific category names that best describe the topic. Use title-case. Return ONLY the JSON array, no explanation.",
+        },
+        {
+          role: "user",
+          content: `Title: ${title}\nExcerpt: ${excerpt || ""}`,
+        },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "categories",
+          strict: true,
+          schema: {
+            type: "object",
+            properties: {
+              categories: {
+                type: "array",
+                items: { type: "string" },
+              },
+            },
+            required: ["categories"],
+            additionalProperties: false,
+          },
+        },
+      },
+    });
+    const raw = resp.choices?.[0]?.message?.content;
+    if (!raw || typeof raw !== "string") return [];
+    const parsed = JSON.parse(raw) as { categories: string[] };
+    return (parsed.categories || []).slice(0, 3);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * For each category name, find its WP ID (by slug search) or create it.
+ * Returns an array of WP category IDs.
+ */
+async function resolveWpCategoryIds(
+  categoryNames: string[],
+  apiBase: string,
+  credentials: string,
+): Promise<number[]> {
+  const ids: number[] = [];
+  for (const name of categoryNames) {
+    try {
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      // Search for existing category
+      const searchResp = await fetch(`${apiBase}/categories?search=${encodeURIComponent(name)}&per_page=5`, {
+        headers: { Authorization: `Basic ${credentials}` },
+      });
+      if (searchResp.ok) {
+        const cats = (await searchResp.json()) as Array<{ id: number; slug: string; name: string }>;
+        const match = cats.find(c => c.slug === slug || c.name.toLowerCase() === name.toLowerCase());
+        if (match) {
+          ids.push(match.id);
+          continue;
+        }
+      }
+      // Create new category
+      const createResp = await fetch(`${apiBase}/categories`, {
+        method: "POST",
+        headers: { Authorization: `Basic ${credentials}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ name, slug }),
+      });
+      if (createResp.ok) {
+        const created = (await createResp.json()) as { id: number };
+        ids.push(created.id);
+      }
+    } catch {
+      // Skip category on error
+    }
+  }
+  return ids;
+}
+
+/**
+ * Generate a featured image and upload it to the WP media library.
+ * Returns the WP media attachment ID, or undefined on failure.
+ */
+async function uploadFeaturedImageToWp(
+  title: string,
+  apiBase: string,
+  credentials: string,
+): Promise<number | undefined> {
+  try {
+    const imagePrompt = `Professional real estate blog featured image for an article titled "${title}". Clean, modern, photorealistic. No text overlays.`;
+    const { url: storageRelUrl } = await generateImage({ prompt: imagePrompt });
+    if (!storageRelUrl) return undefined;
+
+    // storageRelUrl is /manus-storage/<key> — get a signed S3 URL to fetch the bytes
+    const key = storageRelUrl.replace(/^\/manus-storage\//, "");
+    const s3Url = await storageGetSignedUrl(key);
+    const imgResp = await fetch(s3Url);
+    if (!imgResp.ok) return undefined;
+    const imgBuffer = Buffer.from(await imgResp.arrayBuffer());
+
+    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60);
+    const mediaResp = await fetch(`${apiBase}/media`, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${credentials}`,
+        "Content-Type": "image/png",
+        "Content-Disposition": `attachment; filename="${slug}.png"`,
+      },
+      body: new Uint8Array(imgBuffer),
+    });
+    if (!mediaResp.ok) return undefined;
+    const mediaData = (await mediaResp.json()) as { id: number };
+    return mediaData.id || undefined;
+  } catch {
+    console.warn("[WP Push] Featured image generation/upload failed (non-fatal)");
+    return undefined;
+  }
 }
 
 // ─── Topics Router ────────────────────────────────────────────────────────────
@@ -567,10 +707,19 @@ const wordpressRouter = router({
       let responsePayload: string | undefined;
 
       try {
-        // Create the post
+        // 1. Suggest and resolve WP categories via LLM (non-fatal)
+        const categoryNames = await suggestWpCategories(draft.title || "", draft.excerpt || "");
+        const categoryIds = categoryNames.length > 0
+          ? await resolveWpCategoryIds(categoryNames, apiBase, credentials)
+          : [];
+
+        // 2. Generate and upload featured image (non-fatal)
+        const featuredMediaId = await uploadFeaturedImageToWp(draft.title || "", apiBase, credentials);
+
+        // 3. Build post payload
         const postPayload: Record<string, unknown> = {
           title: draft.title || "",
-          content: draft.content || "",
+          content: stripLeadingH1(draft.content || ""),
           excerpt: draft.excerpt || "",
           status: input.wpPostStatus,
           meta: {
@@ -580,6 +729,8 @@ const wordpressRouter = router({
             rank_math_canonical_url: draft.canonicalUrl || "",
           },
         };
+        if (categoryIds.length > 0) postPayload.categories = categoryIds;
+        if (featuredMediaId) postPayload.featured_media = featuredMediaId;
 
         const response = await fetch(`${apiBase}/posts`, {
           method: "POST",
@@ -602,9 +753,10 @@ const wordpressRouter = router({
           await updateDraft(input.draftId, { status: "published" });
           await updateTopic(input.topicId, { status: "published" });
 
+          const categoriesNote = categoryNames.length > 0 ? `\nCategories: ${categoryNames.join(", ")}` : "";
           await notifyOwner({
             title: "Post Published to WordPress",
-            content: `"${draft.title}" has been pushed to WordPress as ${input.wpPostStatus}. Post ID: ${wpPostId}`,
+            content: `"${draft.title}" has been pushed to WordPress as ${input.wpPostStatus}.\nPost ID: ${wpPostId}\nView post: ${wpPostUrl}${categoriesNote}`,
           });
         } else {
           errorMessage = data.message || `HTTP ${response.status}`;

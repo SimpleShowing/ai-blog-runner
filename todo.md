@@ -48,3 +48,9 @@
 - [x] Settings.tsx: editors.list query gated to admin only (enabled: isAdmin)
 - [x] Vitest unit tests for key routers (21 tests passing)
 - [x] Final checkpoint and delivery
+
+## Phase 9: WP Push Improvements (Round 2)
+
+- [x] Include live WP post URL in owner notification email on successful push
+- [x] Add search bar to Publish Log page (filter by article title)
+- [x] Auto-assign WordPress categories via LLM during push (suggest 1-3 categories, look up or create via WP REST API, assign to post)

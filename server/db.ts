@@ -288,7 +288,25 @@ export async function createWpLog(data: typeof wpPublishLogs.$inferInsert) {
 export async function getAllWpLogs() {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(wpPublishLogs).orderBy(desc(wpPublishLogs.pushedAt)).limit(50);
+  return db
+    .select({
+      id: wpPublishLogs.id,
+      draftId: wpPublishLogs.draftId,
+      topicId: wpPublishLogs.topicId,
+      wpPostId: wpPublishLogs.wpPostId,
+      wpPostUrl: wpPublishLogs.wpPostUrl,
+      wpStatus: wpPublishLogs.wpStatus,
+      pushedBy: wpPublishLogs.pushedBy,
+      rankMathPopulated: wpPublishLogs.rankMathPopulated,
+      success: wpPublishLogs.success,
+      errorMessage: wpPublishLogs.errorMessage,
+      pushedAt: wpPublishLogs.pushedAt,
+      draftTitle: drafts.title,
+    })
+    .from(wpPublishLogs)
+    .leftJoin(drafts, eq(drafts.id, wpPublishLogs.draftId))
+    .orderBy(desc(wpPublishLogs.pushedAt))
+    .limit(50);
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
