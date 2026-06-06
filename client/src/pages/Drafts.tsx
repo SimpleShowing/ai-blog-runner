@@ -100,10 +100,8 @@ export default function Drafts() {
                 <tr key={draft.id} className="hover:bg-accent/50 transition-colors group">
                   <td className="px-4 py-3">
                     <div className="min-w-0">
-                      <Link href={`/drafts/${draft.id}`}>
-                        <a className="text-sm font-medium text-foreground hover:text-primary transition-colors truncate block max-w-sm">
-                          {draft.title || `Draft #${draft.id}`}
-                        </a>
+                      <Link href={`/drafts/${draft.id}`} className="text-sm font-medium text-foreground hover:text-primary transition-colors truncate block max-w-sm">
+                        {draft.title || `Draft #${draft.id}`}
                       </Link>
                       {draft.seoTitle && (
                         <p className="text-xs truncate max-w-sm mt-0.5" style={{ color: "var(--muted-foreground)" }}>
@@ -125,10 +123,8 @@ export default function Drafts() {
                     <StatusBadge status={draft.status} />
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <Link href={`/drafts/${draft.id}`}>
-                      <a className="inline-flex items-center gap-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity hover:text-primary" style={{ color: "var(--muted-foreground)" }}>
-                        Review <ArrowRight className="w-3 h-3" />
-                      </a>
+                    <Link href={`/drafts/${draft.id}`} className="inline-flex items-center gap-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity hover:text-primary" style={{ color: "var(--muted-foreground)" }}>
+                      Review <ArrowRight className="w-3 h-3" />
                     </Link>
                   </td>
                 </tr>

@@ -110,10 +110,8 @@ export default function Dashboard() {
         <div className="glass-card p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-foreground">Recent Topics</h2>
-            <Link href="/topics">
-              <a className="text-xs flex items-center gap-1 hover:text-primary transition-colors" style={{ color: "var(--muted-foreground)" }}>
-                View all <ArrowRight className="w-3 h-3" />
-              </a>
+            <Link href="/topics" className="text-xs flex items-center gap-1 hover:text-primary transition-colors" style={{ color: "var(--muted-foreground)" }}>
+              View all <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
           {topicsLoading ? (
@@ -131,17 +129,15 @@ export default function Dashboard() {
           ) : (
             <div className="space-y-2">
               {recentTopics.map(topic => (
-                <Link key={topic.id} href={`/topics/${topic.id}`}>
-                  <a className="flex items-center justify-between p-3 rounded-lg hover:bg-accent transition-colors group">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">{topic.title}</p>
-                      <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>{topic.targetMarket || "National"}</p>
-                    </div>
-                    <div className="flex items-center gap-2 ml-3 flex-shrink-0">
-                      <PriorityBadge priority={topic.priority} />
-                      <StatusBadge status={topic.status} />
-                    </div>
-                  </a>
+                <Link key={topic.id} href={`/topics/${topic.id}`} className="flex items-center justify-between p-3 rounded-lg hover:bg-accent transition-colors group">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">{topic.title}</p>
+                    <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>{topic.targetMarket || "National"}</p>
+                  </div>
+                  <div className="flex items-center gap-2 ml-3 flex-shrink-0">
+                    <PriorityBadge priority={topic.priority} />
+                    <StatusBadge status={topic.status} />
+                  </div>
                 </Link>
               ))}
             </div>
@@ -152,10 +148,8 @@ export default function Dashboard() {
         <div className="glass-card p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-foreground">Review Queue</h2>
-            <Link href="/drafts">
-              <a className="text-xs flex items-center gap-1 hover:text-primary transition-colors" style={{ color: "var(--muted-foreground)" }}>
-                View all <ArrowRight className="w-3 h-3" />
-              </a>
+            <Link href="/drafts" className="text-xs flex items-center gap-1 hover:text-primary transition-colors" style={{ color: "var(--muted-foreground)" }}>
+              View all <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
           {draftsLoading ? (
@@ -170,18 +164,16 @@ export default function Dashboard() {
           ) : (
             <div className="space-y-2">
               {reviewQueue.map(draft => (
-                <Link key={draft.id} href={`/drafts/${draft.id}`}>
-                  <a className="flex items-center justify-between p-3 rounded-lg hover:bg-accent transition-colors group">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">
-                        {draft.title || `Draft #${draft.id}`}
-                      </p>
-                      <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
-                        {new Date(draft.updatedAt).toLocaleDateString()}
-                      </p>
-                    </div>
-                    <StatusBadge status={draft.status} />
-                  </a>
+                <Link key={draft.id} href={`/drafts/${draft.id}`} className="flex items-center justify-between p-3 rounded-lg hover:bg-accent transition-colors group">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">
+                      {draft.title || `Draft #${draft.id}`}
+                    </p>
+                    <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
+                      {new Date(draft.updatedAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <StatusBadge status={draft.status} />
                 </Link>
               ))}
             </div>

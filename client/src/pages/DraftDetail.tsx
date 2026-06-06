@@ -163,10 +163,8 @@ export default function DraftDetail() {
   return (
     <div className="space-y-6 max-w-5xl">
       {/* Back */}
-      <Link href="/drafts">
-        <a className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
-          <ArrowLeft className="w-4 h-4" /> Back to Drafts
-        </a>
+      <Link href="/drafts" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
+        <ArrowLeft className="w-4 h-4" /> Back to Drafts
       </Link>
 
       {/* Header */}

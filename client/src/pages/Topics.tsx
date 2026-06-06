@@ -185,10 +185,8 @@ export default function Topics() {
                     <div className="flex items-center gap-2">
                       <PriorityDot priority={topic.priority} />
                       <div className="min-w-0">
-                        <Link href={`/topics/${topic.id}`}>
-                          <a className="text-sm font-medium text-foreground hover:text-primary transition-colors truncate block max-w-xs">
-                            {topic.title}
-                          </a>
+                        <Link href={`/topics/${topic.id}`} className="text-sm font-medium text-foreground hover:text-primary transition-colors truncate block max-w-xs">
+                          {topic.title}
                         </Link>
                         {topic.targetKeyword && (
                           <p className="text-xs truncate max-w-xs" style={{ color: "var(--muted-foreground)" }}>

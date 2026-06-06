@@ -150,10 +150,8 @@ export default function TopicDetail() {
   return (
     <div className="space-y-6 max-w-4xl">
       {/* Back */}
-      <Link href="/topics">
-        <a className="inline-flex items-center gap-1.5 text-sm hover:text-primary transition-colors" style={{ color: "var(--muted-foreground)" }}>
-          <ArrowLeft className="w-4 h-4" /> Back to Topics
-        </a>
+      <Link href="/topics" className="inline-flex items-center gap-1.5 text-sm hover:text-primary transition-colors" style={{ color: "var(--muted-foreground)" }}>
+        <ArrowLeft className="w-4 h-4" /> Back to Topics
       </Link>
 
       {/* Topic header */}
@@ -297,20 +295,18 @@ export default function TopicDetail() {
           <h2 className="text-base font-semibold text-foreground mb-4">Drafts</h2>
           <div className="space-y-2">
             {drafts!.map(draft => (
-              <Link key={draft.id} href={`/drafts/${draft.id}`}>
-                <a className="flex items-center justify-between p-3 rounded-lg hover:bg-accent transition-colors group">
-                  <div>
-                    <p className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">
-                      {draft.title || `Draft #${draft.id}`}
-                    </p>
-                    <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
-                      v{draft.version} · {new Date(draft.updatedAt).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <span className={cn("inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium", `badge-${draft.status}`)}>
-                    {draft.status.replace(/_/g, " ")}
-                  </span>
-                </a>
+              <Link key={draft.id} href={`/drafts/${draft.id}`} className="flex items-center justify-between p-3 rounded-lg hover:bg-accent transition-colors group">
+                <div>
+                  <p className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">
+                    {draft.title || `Draft #${draft.id}`}
+                  </p>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
+                    v{draft.version} · {new Date(draft.updatedAt).toLocaleDateString()}
+                  </p>
+                </div>
+                <span className={cn("inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium", `badge-${draft.status}`)}>
+                  {draft.status.replace(/_/g, " ")}
+                </span>
               </Link>
             ))}
           </div>
