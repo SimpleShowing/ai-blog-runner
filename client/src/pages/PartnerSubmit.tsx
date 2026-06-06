@@ -118,7 +118,7 @@ export default function PartnerSubmit() {
             <div className="flex justify-center">
               <CheckCircle2 className="h-16 w-16 text-green-500" />
             </div>
-            <h2 className="text-2xl font-bold text-slate-900">Submission Received!</h2>
+            <h2 className="text-2xl font-bold text-white">Submission Received!</h2>
             <p className="text-slate-600">
               Thank you for your submission. Our team will review your article and get back to you
               within 2–3 business days.
