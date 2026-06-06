@@ -61,10 +61,10 @@
 - [x] Generate and apply migration SQL
 - [x] Add db helpers: createPartnerSubmission, getPartnerSubmissions, getPartnerSubmissionById, updatePartnerSubmission
 - [x] Add tRPC procedures: partnerSubmissions.submit (public), partnerSubmissions.list (admin), partnerSubmissions.get (admin), partnerSubmissions.review (admin), partnerSubmissions.approve (admin), partnerSubmissions.reject (admin)
-- [ ] .docx upload: server-side parse with mammoth npm package, extract plain text (deferred)
+- [x] .docx upload: add file input to /submit form and server-side mammoth parse endpoint
 - [x] Public submission form page at /submit (non-gated): partner name, email, title, category, submission type, content (paste/upload/.docx/Google Docs link), declared do-follow links (repeating field)
 - [x] Internal Partner Submissions page in dashboard: list view with status badges, detail/review modal, approve/reject actions
 - [x] LLM link quality check: flag undeclared links in body, check declared links against blocklist (gambling, payday, adult)
 - [x] Automated partner email notifications: received confirmation, approved, rejected (with reason), published
 - [x] Add "Partner Submissions" nav item to DashboardLayout sidebar
-- [ ] Vitest tests for submit and review procedures (deferred — covered by manual QA)
+- [x] Vitest tests for partnerSubmissions procedures: submit, startReview, approve, reject, runLinkQa

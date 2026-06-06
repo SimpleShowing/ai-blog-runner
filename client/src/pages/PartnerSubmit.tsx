@@ -19,7 +19,7 @@ type FormData = {
   title: string;
   category: string;
   submissionType: "guest_post" | "link_insertion";
-  contentMode: "paste" | "google_docs";
+  contentMode: "paste" | "google_docs" | "docx";
   contentText: string;
   googleDocsUrl: string;
   targetArticleUrl: string;
@@ -36,6 +36,9 @@ const CATEGORIES = [
 export default function PartnerSubmit() {
   const [submitted, setSubmitted] = useState(false);
   const [submissionId, setSubmissionId] = useState<number | null>(null);
+  const [docxFile, setDocxFile] = useState<File | null>(null);
+  const [docxUploading, setDocxUploading] = useState(false);
+  const [docxError, setDocxError] = useState<string | null>(null);
 
   const {
     register,
@@ -67,7 +70,32 @@ export default function PartnerSubmit() {
     },
   });
 
-  const onSubmit = (data: FormData) => {
+  const handleDocxUpload = async (file: File): Promise<string | null> => {
+    setDocxUploading(true);
+    setDocxError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/upload/docx", { method: "POST", body: formData });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Upload failed");
+      return json.text as string;
+    } catch (err) {
+      setDocxError(err instanceof Error ? err.message : "Upload failed");
+      return null;
+    } finally {
+      setDocxUploading(false);
+    }
+  };
+
+  const onSubmit = async (data: FormData) => {
+    let finalContentText = data.contentMode === "paste" ? data.contentText || undefined : undefined;
+    if (data.contentMode === "docx") {
+      if (!docxFile) { toast.error("Please select a .docx file to upload."); return; }
+      const extracted = await handleDocxUpload(docxFile);
+      if (!extracted) return;
+      finalContentText = extracted;
+    }
     submitMutation.mutate({
       partnerName: data.partnerName,
       partnerEmail: data.partnerEmail,
@@ -75,7 +103,7 @@ export default function PartnerSubmit() {
       title: data.title,
       category: data.category || undefined,
       submissionType: data.submissionType,
-      contentText: data.contentMode === "paste" ? data.contentText || undefined : undefined,
+      contentText: finalContentText,
       googleDocsUrl: data.contentMode === "google_docs" ? data.googleDocsUrl || undefined : undefined,
       targetArticleUrl: data.submissionType === "link_insertion" ? data.targetArticleUrl || undefined : undefined,
       declaredLinks: data.declaredLinks,
@@ -282,7 +310,7 @@ export default function PartnerSubmit() {
                   <div className="space-y-1.5">
                     <Label>Article Content</Label>
                     <div className="flex gap-2">
-                      {(["paste", "google_docs"] as const).map((mode) => (
+                      {(["paste", "google_docs", "docx"] as const).map((mode) => (
                         <button
                           key={mode}
                           type="button"
@@ -293,13 +321,13 @@ export default function PartnerSubmit() {
                               : "bg-white text-slate-600 border-slate-300 hover:border-slate-400"
                           }`}
                         >
-                          {mode === "paste" ? "Paste Content" : "Google Docs Link"}
+                          {mode === "paste" ? "Paste Content" : mode === "google_docs" ? "Google Docs Link" : "Upload .docx"}
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  {contentMode === "paste" ? (
+                  {contentMode === "paste" && (
                     <div className="space-y-1.5">
                       <Textarea
                         placeholder="Paste your full article content here. HTML, Markdown, or plain text are all accepted."
@@ -309,13 +337,35 @@ export default function PartnerSubmit() {
                       />
                       <p className="text-xs text-slate-400">Minimum 300 words recommended.</p>
                     </div>
-                  ) : (
+                  )}
+                  {contentMode === "google_docs" && (
                     <div className="space-y-1.5">
                       <Input
                         placeholder="https://docs.google.com/document/d/..."
                         {...register("googleDocsUrl")}
                       />
                       <p className="text-xs text-slate-400">Make sure the document is set to &quot;Anyone with the link can view&quot;.</p>
+                    </div>
+                  )}
+                  {contentMode === "docx" && (
+                    <div className="space-y-1.5">
+                      <input
+                        type="file"
+                        accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0] ?? null;
+                          setDocxFile(f);
+                          setDocxError(null);
+                        }}
+                        className="block w-full text-sm text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100 cursor-pointer"
+                      />
+                      {docxFile && (
+                        <p className="text-xs text-teal-700">Selected: {docxFile.name}</p>
+                      )}
+                      {docxError && (
+                        <p className="text-xs text-red-500">{docxError}</p>
+                      )}
+                      <p className="text-xs text-slate-400">Maximum file size: 10 MB. Only .docx format is accepted.</p>
                     </div>
                   )}
                 </>

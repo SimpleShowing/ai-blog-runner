@@ -105,6 +105,10 @@ vi.mock("./db", () => ({
   removeEditor: vi.fn(async () => {}),
   isEmailAllowed: vi.fn(async () => true),
   getAllUsers: vi.fn(async () => []),
+  createPartnerSubmission: vi.fn(async () => ({ id: 1 })),
+  getPartnerSubmissions: vi.fn(async () => []),
+  getPartnerSubmissionById: vi.fn(async () => null),
+  updatePartnerSubmission: vi.fn(async () => {}),
 }));
 
 // ─── Mock LLM (not tested here) ──────────────────────────────────────────────
@@ -503,5 +507,145 @@ describe("wordpress.push", () => {
     } finally {
       global.fetch = originalFetch;
     }
+  });
+});
+
+// ─── partnerSubmissions router ────────────────────────────────────────────────
+
+// Import DB module for partner submission mocks (already imported above as _wpPushDbMod)
+const _partnerDbMod = _wpPushDbMod;
+
+const MOCK_SUBMISSION = {
+  id: 1,
+  partnerName: "Jane Doe",
+  partnerEmail: "jane@example.com",
+  partnerCompany: "SEO Agency",
+  title: "Top 10 Home Improvement Tips",
+  category: "Home Improvement",
+  submissionType: "guest_post" as const,
+  contentText: "This is a great article about home improvement...",
+  googleDocsUrl: null,
+  contentFileKey: null,
+  targetArticleUrl: null,
+  declaredLinks: [{ url: "https://example.com/home-tips", anchorText: "home tips" }],
+  linkQaStatus: "pass" as const,
+  linkQaDetails: "All declared links passed blocklist check.",
+  status: "pending" as const,
+  reviewNotes: null,
+  reviewedBy: null,
+  reviewedAt: null,
+  wpPostId: null,
+  wpPostUrl: null,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+};
+
+describe("partnerSubmissions router", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    // Restore notification mock
+    (_wpPushNotifMod.notifyOwner as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    // Restore partner DB mocks
+    (_partnerDbMod.createPartnerSubmission as ReturnType<typeof vi.fn>).mockResolvedValue(MOCK_SUBMISSION);
+    (_partnerDbMod.getPartnerSubmissions as ReturnType<typeof vi.fn>).mockResolvedValue([MOCK_SUBMISSION]);
+    (_partnerDbMod.getPartnerSubmissionById as ReturnType<typeof vi.fn>).mockResolvedValue(MOCK_SUBMISSION);
+    (_partnerDbMod.updatePartnerSubmission as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+  });
+
+  it("submit: creates a submission and notifies owner (public procedure)", async () => {
+    const caller = appRouter.createCaller(makeCtx(null)); // public — no auth
+    const result = await caller.partnerSubmissions.submit({
+      partnerName: "Jane Doe",
+      partnerEmail: "jane@example.com",
+      title: "Top 10 Home Improvement Tips",
+      submissionType: "guest_post",
+      declaredLinks: [{ url: "https://example.com/home-tips", anchorText: "home tips" }],
+    });
+    expect(result).toEqual({ success: true, id: MOCK_SUBMISSION.id });
+    expect(_partnerDbMod.createPartnerSubmission).toHaveBeenCalledWith(
+      expect.objectContaining({ partnerName: "Jane Doe", status: "pending" })
+    );
+    expect(_wpPushNotifMod.notifyOwner).toHaveBeenCalledWith(
+      expect.objectContaining({ title: expect.stringContaining("New Partner Submission") })
+    );
+  });
+
+  it("submit: flags a blocklisted link and sets linkQaStatus to fail", async () => {
+    const caller = appRouter.createCaller(makeCtx(null));
+    await caller.partnerSubmissions.submit({
+      partnerName: "Spammer",
+      partnerEmail: "spam@casino.com",
+      title: "Casino Tricks",
+      submissionType: "guest_post",
+      declaredLinks: [{ url: "https://casino-slots.com/poker", anchorText: "poker" }],
+    });
+    expect(_partnerDbMod.createPartnerSubmission).toHaveBeenCalledWith(
+      expect.objectContaining({ linkQaStatus: "fail" })
+    );
+  });
+
+  it("list: requires admin authentication", async () => {
+    const caller = appRouter.createCaller(makeCtx(null));
+    await expect(caller.partnerSubmissions.list()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("list: returns all submissions for admin", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    const result = await caller.partnerSubmissions.list();
+    expect(result).toHaveLength(1);
+    expect(result[0].partnerName).toBe("Jane Doe");
+  });
+
+  it("startReview: marks submission as in_review", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    const result = await caller.partnerSubmissions.startReview({ id: 1 });
+    expect(result).toEqual({ success: true });
+    expect(_partnerDbMod.updatePartnerSubmission).toHaveBeenCalledWith(1, { status: "in_review" });
+  });
+
+  it("approve: marks submission as approved and notifies owner", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    const result = await caller.partnerSubmissions.approve({ id: 1, reviewNotes: "Looks great!" });
+    expect(result).toEqual({ success: true });
+    expect(_partnerDbMod.updatePartnerSubmission).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ status: "approved", reviewNotes: "Looks great!" })
+    );
+    expect(_wpPushNotifMod.notifyOwner).toHaveBeenCalledWith(
+      expect.objectContaining({ title: expect.stringContaining("Approved") })
+    );
+  });
+
+  it("reject: marks submission as rejected with a reason", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    const result = await caller.partnerSubmissions.reject({ id: 1, reviewNotes: "Contains casino links." });
+    expect(result).toEqual({ success: true });
+    expect(_partnerDbMod.updatePartnerSubmission).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ status: "rejected", reviewNotes: "Contains casino links." })
+    );
+  });
+
+  it("reject: requires a non-empty reviewNotes reason", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    await expect(
+      caller.partnerSubmissions.reject({ id: 1, reviewNotes: "" })
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("runLinkQa: re-runs blocklist check and returns result", async () => {
+    // Override with a submission that has a flagged link
+    (_partnerDbMod.getPartnerSubmissionById as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...MOCK_SUBMISSION,
+      declaredLinks: [{ url: "https://gambling-site.com/slots", anchorText: "slots" }],
+    });
+    const caller = appRouter.createCaller(makeCtx());
+    const result = await caller.partnerSubmissions.runLinkQa({ id: 1 });
+    expect(result.linkQaStatus).toBe("fail");
+    expect(result.flagged.length).toBeGreaterThan(0);
+    expect(_partnerDbMod.updatePartnerSubmission).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ linkQaStatus: "fail" })
+    );
   });
 });
