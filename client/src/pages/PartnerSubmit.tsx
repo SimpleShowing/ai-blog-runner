@@ -146,9 +146,11 @@ export default function PartnerSubmit() {
       {/* Header */}
       <div className="bg-white border-b border-slate-200 shadow-sm">
         <div className="max-w-3xl mx-auto px-6 py-5 flex items-center gap-3">
-          <div className="h-9 w-9 rounded-lg bg-teal-600 flex items-center justify-center">
-            <FileText className="h-5 w-5 text-white" />
-          </div>
+          <img
+            src="/manus-storage/simpleshowing-icon_c9107b37.png"
+            alt="SimpleShowing"
+            className="h-9 w-9 rounded-lg object-contain"
+          />
           <div>
             <h1 className="text-lg font-bold text-slate-900 leading-tight">SimpleShowing Partner Portal</h1>
             <p className="text-sm text-slate-500">Guest Post &amp; Link Insertion Submissions</p>
@@ -175,7 +177,7 @@ export default function PartnerSubmit() {
               <div className="text-sm text-teal-800 space-y-1">
                 <p className="font-semibold">Before you submit, please note:</p>
                 <ul className="list-disc list-inside space-y-0.5 text-teal-700">
-                  <li>All content must be original and relevant to real estate or home improvement.</li>
+                  <li>All content must be original and relevant to real estate, home improvement/decor, finance, or other related topics.</li>
                   <li>You must declare all do-follow outbound links in the form below.</li>
                   <li>Links to gambling, adult, pharmaceutical, or unrelated sites will be rejected.</li>
                   <li>Our team reviews all submissions within 2–3 business days.</li>
@@ -291,8 +293,10 @@ export default function PartnerSubmit() {
               </div>
 
               <div className="space-y-1.5">
-                <Label>Category <span className="text-slate-400 font-normal">(optional)</span></Label>
-                <Select onValueChange={(v) => setValue("category", v)}>
+                <Label>Category <span className="text-red-500">*</span></Label>
+                <Select
+                  onValueChange={(v) => setValue("category", v, { shouldValidate: true })}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select a category..." />
                   </SelectTrigger>
@@ -302,6 +306,11 @@ export default function PartnerSubmit() {
                     ))}
                   </SelectContent>
                 </Select>
+                <input
+                  type="hidden"
+                  {...register("category", { required: "Please select a category" })}
+                />
+                {errors.category && <p className="text-xs text-red-500">{errors.category.message}</p>}
               </div>
 
               {submissionType === "guest_post" && (
