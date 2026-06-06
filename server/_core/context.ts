@@ -1,6 +1,7 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
 import { sdk } from "./sdk";
+import { isEmailAllowed } from "../db";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
@@ -14,7 +15,14 @@ export async function createContext(
   let user: User | null = null;
 
   try {
-    user = await sdk.authenticateRequest(opts.req);
+    const authed = await sdk.authenticateRequest(opts.req);
+    // Enforce allowlist: owner or invited editor only
+    if (authed && !authed.isCron) {
+      const allowed = await isEmailAllowed(authed.email || "", authed.openId);
+      user = allowed ? authed : null;
+    } else {
+      user = authed;
+    }
   } catch (error) {
     // Authentication is optional for public procedures.
     user = null;
