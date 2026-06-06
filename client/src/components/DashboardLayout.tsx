@@ -56,11 +56,14 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
         {navItems.map(({ href, icon: Icon, label }) => {
           const isActive = href === "/" ? location === "/" : location.startsWith(href);
           return (
-            <Link key={href} href={href}>
-              <a className={cn("sidebar-item", isActive && "active")} title={collapsed ? label : undefined}>
-                <Icon className="w-4 h-4 flex-shrink-0" />
-                {!collapsed && <span>{label}</span>}
-              </a>
+            <Link
+              key={href}
+              href={href}
+              className={cn("sidebar-item", isActive && "active")}
+              title={collapsed ? label : undefined}
+            >
+              <Icon className="w-4 h-4 flex-shrink-0" />
+              {!collapsed && <span>{label}</span>}
             </Link>
           );
         })}
