@@ -133,6 +133,13 @@ vi.mock("./_core/notification", () => ({
   notifyOwner: vi.fn(async () => true),
 }));
 
+vi.mock("./email", () => ({
+  sendPartnerSubmissionReceived: vi.fn(async () => {}),
+  sendPartnerApproved: vi.fn(async () => {}),
+  sendPartnerRejected: vi.fn(async () => {}),
+  sendPartnerPublished: vi.fn(async () => {}),
+}));
+
 // ─── Context helpers ──────────────────────────────────────────────────────────
 
 type AuthenticatedUser = NonNullable<TrpcContext["user"]>;
@@ -514,6 +521,7 @@ describe("wordpress.push", () => {
 
 // Import DB module for partner submission mocks (already imported above as _wpPushDbMod)
 const _partnerDbMod = _wpPushDbMod;
+const _emailMod = await import("./email");
 
 const MOCK_SUBMISSION = {
   id: 1,
@@ -545,6 +553,11 @@ describe("partnerSubmissions router", () => {
     vi.resetAllMocks();
     // Restore notification mock
     (_wpPushNotifMod.notifyOwner as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    // Restore email mocks
+    (_emailMod.sendPartnerSubmissionReceived as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (_emailMod.sendPartnerApproved as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (_emailMod.sendPartnerRejected as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (_emailMod.sendPartnerPublished as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
     // Restore partner DB mocks
     (_partnerDbMod.createPartnerSubmission as ReturnType<typeof vi.fn>).mockResolvedValue(MOCK_SUBMISSION);
     (_partnerDbMod.getPartnerSubmissions as ReturnType<typeof vi.fn>).mockResolvedValue([MOCK_SUBMISSION]);
@@ -567,6 +580,9 @@ describe("partnerSubmissions router", () => {
     );
     expect(_wpPushNotifMod.notifyOwner).toHaveBeenCalledWith(
       expect.objectContaining({ title: expect.stringContaining("New Partner Submission") })
+    );
+    expect(_emailMod.sendPartnerSubmissionReceived).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "jane@example.com", partnerName: "Jane Doe" })
     );
   });
 
@@ -614,6 +630,9 @@ describe("partnerSubmissions router", () => {
     expect(_wpPushNotifMod.notifyOwner).toHaveBeenCalledWith(
       expect.objectContaining({ title: expect.stringContaining("Approved") })
     );
+    expect(_emailMod.sendPartnerApproved).toHaveBeenCalledWith(
+      expect.objectContaining({ to: MOCK_SUBMISSION.partnerEmail, partnerName: MOCK_SUBMISSION.partnerName })
+    );
   });
 
   it("reject: marks submission as rejected with a reason", async () => {
@@ -624,6 +643,9 @@ describe("partnerSubmissions router", () => {
       1,
       expect.objectContaining({ status: "rejected", reviewNotes: "Contains casino links." })
     );
+    expect(_emailMod.sendPartnerRejected).toHaveBeenCalledWith(
+      expect.objectContaining({ to: MOCK_SUBMISSION.partnerEmail, reason: "Contains casino links." })
+    );
   });
 
   it("reject: requires a non-empty reviewNotes reason", async () => {
@@ -631,6 +653,26 @@ describe("partnerSubmissions router", () => {
     await expect(
       caller.partnerSubmissions.reject({ id: 1, reviewNotes: "" })
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("markPublished: marks submission as published and emails partner with live URL", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    const result = await caller.partnerSubmissions.markPublished({
+      id: 1,
+      wpPostId: 999,
+      wpPostUrl: "https://www.simpleshowing.com/blog/home-improvement-tips",
+    });
+    expect(result).toEqual({ success: true });
+    expect(_partnerDbMod.updatePartnerSubmission).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ status: "published", wpPostUrl: "https://www.simpleshowing.com/blog/home-improvement-tips" })
+    );
+    expect(_emailMod.sendPartnerPublished).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: MOCK_SUBMISSION.partnerEmail,
+        wpPostUrl: "https://www.simpleshowing.com/blog/home-improvement-tips",
+      })
+    );
   });
 
   it("runLinkQa: re-runs blocklist check and returns result", async () => {

@@ -21,6 +21,12 @@ import {
 import { ENV } from "./_core/env";
 import { generateImage } from "./_core/imageGeneration";
 import { storageGetSignedUrl } from "./storage";
+import {
+  sendPartnerSubmissionReceived,
+  sendPartnerApproved,
+  sendPartnerRejected,
+  sendPartnerPublished,
+} from "./email";
 
 // ─── Admin guard ──────────────────────────────────────────────────────────────
 
@@ -902,6 +908,14 @@ const partnerSubmissionsRouter = router({
         content: `Partner: ${input.partnerName} (${input.partnerEmail})\nType: ${input.submissionType}\nTitle: ${input.title}\nLink QA: ${linkQaStatus}${flagged.length > 0 ? ` — ${linkQaDetails}` : ""}\n\nReview it in the dashboard.`,
       });
 
+      // Email partner: submission received
+      await sendPartnerSubmissionReceived({
+        to: input.partnerEmail,
+        partnerName: input.partnerName,
+        title: input.title,
+        referenceId: submission.id,
+      });
+
       return { success: true, id: submission.id };
     }),
 
@@ -942,6 +956,13 @@ const partnerSubmissionsRouter = router({
           title: `Submission Approved: ${sub.title}`,
           content: `The submission "${sub.title}" by ${sub.partnerName} (${sub.partnerEmail}) has been approved and is ready to publish.`,
         });
+        // Email partner: approved
+        await sendPartnerApproved({
+          to: sub.partnerEmail,
+          partnerName: sub.partnerName,
+          title: sub.title,
+          referenceId: sub.id,
+        });
       }
       return { success: true };
     }),
@@ -956,6 +977,17 @@ const partnerSubmissionsRouter = router({
         reviewedBy: ctx.user.id,
         reviewedAt: new Date(),
       });
+      // Email partner: rejected with reason
+      const rejSub = await getPartnerSubmissionById(input.id);
+      if (rejSub) {
+        await sendPartnerRejected({
+          to: rejSub.partnerEmail,
+          partnerName: rejSub.partnerName,
+          title: rejSub.title,
+          referenceId: rejSub.id,
+          reason: input.reviewNotes,
+        });
+      }
       return { success: true };
     }),
 
@@ -968,6 +1000,19 @@ const partnerSubmissionsRouter = router({
         wpPostId: input.wpPostId ?? null,
         wpPostUrl: input.wpPostUrl ?? null,
       });
+      // Email partner: published with live URL
+      if (input.wpPostUrl) {
+        const pubSub = await getPartnerSubmissionById(input.id);
+        if (pubSub) {
+          await sendPartnerPublished({
+            to: pubSub.partnerEmail,
+            partnerName: pubSub.partnerName,
+            title: pubSub.title,
+            referenceId: pubSub.id,
+            wpPostUrl: input.wpPostUrl,
+          });
+        }
+      }
       return { success: true };
     }),
 

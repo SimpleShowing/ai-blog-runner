@@ -68,3 +68,14 @@
 - [x] Automated partner email notifications: received confirmation, approved, rejected (with reason), published
 - [x] Add "Partner Submissions" nav item to DashboardLayout sidebar
 - [x] Vitest tests for partnerSubmissions procedures: submit, startReview, approve, reject, runLinkQa
+
+## Phase 11: Resend Email Integration
+
+- [x] Install resend npm package (v6.12.4)
+- [x] Add RESEND_API_KEY to env.ts and project secrets
+- [x] Create server/email.ts with 4 typed partner email helpers (sendPartnerSubmissionReceived, sendPartnerApproved, sendPartnerRejected, sendPartnerPublished)
+- [x] Wire sendPartnerSubmissionReceived into partnerSubmissions.submit procedure
+- [x] Wire sendPartnerApproved into partnerSubmissions.approve procedure
+- [x] Wire sendPartnerRejected into partnerSubmissions.reject procedure (includes review reason)
+- [x] Wire sendPartnerPublished into partnerSubmissions.markPublished procedure (includes live WP URL)
+- [x] Mock email module in Vitest; add email-assertion tests for all 4 stages (41 tests passing, 0 TS errors)
