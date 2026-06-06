@@ -2,7 +2,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { getLoginUrl } from "@/const";
 import { Link, useLocation } from "wouter";
-import { Loader2, LayoutDashboard, ListChecks, FileText, Send, Settings, LogOut, ChevronRight, Sparkles, Menu, X } from "lucide-react";
+import { Loader2, LayoutDashboard, ListChecks, FileText, Send, Settings, LogOut, ChevronRight, Sparkles, Menu, X, Users } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -13,6 +13,7 @@ const navItems = [
   { href: "/topics", icon: ListChecks, label: "Topic Queue" },
   { href: "/drafts", icon: FileText, label: "Drafts & Review" },
   { href: "/publish-log", icon: Send, label: "Publish Log" },
+  { href: "/partner-submissions", icon: Users, label: "Partner Submissions" },
   { href: "/settings", icon: Settings, label: "Settings" },
 ];
 

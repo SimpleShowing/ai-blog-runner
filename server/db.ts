@@ -11,6 +11,7 @@ import {
   wpPublishLogs,
   settings,
   invitedEditors,
+  partnerSubmissions,
   type Topic,
   type InsertTopic,
   type Brief,
@@ -19,6 +20,8 @@ import {
   type InsertDraft,
   type Comment,
   type Setting,
+  type PartnerSubmission,
+  type InsertPartnerSubmission,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -338,4 +341,53 @@ export async function setSettings(pairs: Record<string, string>) {
   for (const [key, value] of Object.entries(pairs)) {
     await setSetting(key, value);
   }
+}
+
+// ─── Partner Submissions ──────────────────────────────────────────────────────
+
+export async function createPartnerSubmission(
+  data: InsertPartnerSubmission
+): Promise<PartnerSubmission> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const [result] = await db.insert(partnerSubmissions).values(data);
+  const id = (result as { insertId: number }).insertId;
+  const [row] = await db
+    .select()
+    .from(partnerSubmissions)
+    .where(eq(partnerSubmissions.id, id));
+  return row;
+}
+
+export async function getPartnerSubmissions(): Promise<PartnerSubmission[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(partnerSubmissions)
+    .orderBy(desc(partnerSubmissions.createdAt));
+}
+
+export async function getPartnerSubmissionById(
+  id: number
+): Promise<PartnerSubmission | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db
+    .select()
+    .from(partnerSubmissions)
+    .where(eq(partnerSubmissions.id, id));
+  return row ?? null;
+}
+
+export async function updatePartnerSubmission(
+  id: number,
+  data: Partial<InsertPartnerSubmission>
+): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db
+    .update(partnerSubmissions)
+    .set(data)
+    .where(eq(partnerSubmissions.id, id));
 }

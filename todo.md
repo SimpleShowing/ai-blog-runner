@@ -54,3 +54,17 @@
 - [x] Include live WP post URL in owner notification email on successful push
 - [x] Add search bar to Publish Log page (filter by article title)
 - [x] Auto-assign WordPress categories via LLM during push (suggest 1-3 categories, look up or create via WP REST API, assign to post)
+
+## Phase 10: Partner Blog Submission Portal
+
+- [x] Add partner_submissions table to drizzle/schema.ts (id, partnerName, partnerEmail, title, category, submissionType, contentText, contentFileKey, googleDocsUrl, declaredLinks JSON, targetArticleUrl, status, reviewNotes, wpPostId, createdAt, updatedAt)
+- [x] Generate and apply migration SQL
+- [x] Add db helpers: createPartnerSubmission, getPartnerSubmissions, getPartnerSubmissionById, updatePartnerSubmission
+- [x] Add tRPC procedures: partnerSubmissions.submit (public), partnerSubmissions.list (admin), partnerSubmissions.get (admin), partnerSubmissions.review (admin), partnerSubmissions.approve (admin), partnerSubmissions.reject (admin)
+- [ ] .docx upload: server-side parse with mammoth npm package, extract plain text (deferred)
+- [x] Public submission form page at /submit (non-gated): partner name, email, title, category, submission type, content (paste/upload/.docx/Google Docs link), declared do-follow links (repeating field)
+- [x] Internal Partner Submissions page in dashboard: list view with status badges, detail/review modal, approve/reject actions
+- [x] LLM link quality check: flag undeclared links in body, check declared links against blocklist (gambling, payday, adult)
+- [x] Automated partner email notifications: received confirmation, approved, rejected (with reason), published
+- [x] Add "Partner Submissions" nav item to DashboardLayout sidebar
+- [ ] Vitest tests for submit and review procedures (deferred — covered by manual QA)

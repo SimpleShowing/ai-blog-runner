@@ -16,6 +16,7 @@ import {
   getSetting, getAllSettings, setSetting, setSettings,
   getInvitedEditors, inviteEditor, removeEditor,
   getAllUsers,
+  createPartnerSubmission, getPartnerSubmissions, getPartnerSubmissionById, updatePartnerSubmission,
 } from "./db";
 import { ENV } from "./_core/env";
 import { generateImage } from "./_core/imageGeneration";
@@ -529,10 +530,6 @@ Return JSON with these exact keys:
     .mutation(async ({ input }) => {
       await updateDraft(input.id, { status: "in_review" });
       await updateTopic(input.topicId, { status: "in_review" });
-      await notifyOwner({
-        title: "Draft Submitted for Review",
-        content: `Draft #${input.id} has been submitted for editorial review.`,
-      });
       return { success: true };
     }),
 
@@ -839,7 +836,158 @@ const editorsRouter = router({
     }),
 });
 
-// ─── App Router ───────────────────────────────────────────────────────────────
+// ─── Partner Submissions Router ──────────────────────────────────────────────
+
+/** Blocklist patterns for do-follow link quality check */
+const LINK_BLOCKLIST = [
+  /casino/i, /gambling/i, /poker/i, /slots/i, /betting/i, /sportsbook/i,
+  /payday.?loan/i, /cash.?advance/i, /quick.?loan/i,
+  /adult/i, /porn/i, /escort/i, /xxx/i,
+  /crypto.?pump/i, /forex.?signal/i, /mlm/i, /pyramid/i,
+  /pharma/i, /viagra/i, /cialis/i, /cbd.?oil/i,
+];
+
+function checkLinks(declaredLinks: Array<{ url: string; anchorText: string }>) {
+  const flagged: string[] = [];
+  for (const { url, anchorText } of declaredLinks) {
+    if (LINK_BLOCKLIST.some(re => re.test(url) || re.test(anchorText))) {
+      flagged.push(url);
+    }
+  }
+  return flagged;
+}
+
+const partnerSubmissionsRouter = router({
+  /** Public: submit a guest post or link insertion request */
+  submit: publicProcedure
+    .input(z.object({
+      partnerName: z.string().min(1).max(255),
+      partnerEmail: z.string().email(),
+      partnerCompany: z.string().max(255).optional(),
+      title: z.string().min(1).max(512),
+      category: z.string().max(255).optional(),
+      submissionType: z.enum(["guest_post", "link_insertion"]).default("guest_post"),
+      contentText: z.string().optional(),
+      googleDocsUrl: z.string().url().optional(),
+      targetArticleUrl: z.string().url().optional(),
+      declaredLinks: z.array(z.object({
+        url: z.string().url(),
+        anchorText: z.string().max(255),
+      })).default([]),
+    }))
+    .mutation(async ({ input }) => {
+      // Run link QA immediately
+      const flagged = checkLinks(input.declaredLinks);
+      const linkQaStatus = flagged.length > 0 ? "fail" as const : "pass" as const;
+      const linkQaDetails = flagged.length > 0
+        ? `Flagged links: ${flagged.join(", ")}`
+        : "All declared links passed blocklist check.";
+
+      const submission = await createPartnerSubmission({
+        ...input,
+        partnerCompany: input.partnerCompany ?? null,
+        category: input.category ?? null,
+        contentText: input.contentText ?? null,
+        googleDocsUrl: input.googleDocsUrl ?? null,
+        targetArticleUrl: input.targetArticleUrl ?? null,
+        declaredLinks: input.declaredLinks,
+        linkQaStatus,
+        linkQaDetails,
+        status: "pending",
+      });
+
+      // Notify owner of new submission
+      await notifyOwner({
+        title: `New Partner Submission: ${input.title}`,
+        content: `Partner: ${input.partnerName} (${input.partnerEmail})\nType: ${input.submissionType}\nTitle: ${input.title}\nLink QA: ${linkQaStatus}${flagged.length > 0 ? ` — ${linkQaDetails}` : ""}\n\nReview it in the dashboard.`,
+      });
+
+      return { success: true, id: submission.id };
+    }),
+
+  /** Admin: list all submissions */
+  list: adminProcedure.query(() => getPartnerSubmissions()),
+
+  /** Admin: get a single submission */
+  get: adminProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      const sub = await getPartnerSubmissionById(input.id);
+      if (!sub) throw new TRPCError({ code: "NOT_FOUND", message: "Submission not found" });
+      return sub;
+    }),
+
+  /** Admin: mark as in_review */
+  startReview: adminProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      await updatePartnerSubmission(input.id, { status: "in_review" });
+      return { success: true };
+    }),
+
+  /** Admin: approve a submission */
+  approve: adminProcedure
+    .input(z.object({ id: z.number(), reviewNotes: z.string().optional() }))
+    .mutation(async ({ input, ctx }) => {
+      await updatePartnerSubmission(input.id, {
+        status: "approved",
+        reviewNotes: input.reviewNotes ?? null,
+        reviewedBy: ctx.user.id,
+        reviewedAt: new Date(),
+      });
+      // Notify owner
+      const sub = await getPartnerSubmissionById(input.id);
+      if (sub) {
+        await notifyOwner({
+          title: `Submission Approved: ${sub.title}`,
+          content: `The submission "${sub.title}" by ${sub.partnerName} (${sub.partnerEmail}) has been approved and is ready to publish.`,
+        });
+      }
+      return { success: true };
+    }),
+
+  /** Admin: reject a submission */
+  reject: adminProcedure
+    .input(z.object({ id: z.number(), reviewNotes: z.string().min(1) }))
+    .mutation(async ({ input, ctx }) => {
+      await updatePartnerSubmission(input.id, {
+        status: "rejected",
+        reviewNotes: input.reviewNotes,
+        reviewedBy: ctx.user.id,
+        reviewedAt: new Date(),
+      });
+      return { success: true };
+    }),
+
+  /** Admin: mark as published (after WP push) */
+  markPublished: adminProcedure
+    .input(z.object({ id: z.number(), wpPostId: z.number().optional(), wpPostUrl: z.string().optional() }))
+    .mutation(async ({ input }) => {
+      await updatePartnerSubmission(input.id, {
+        status: "published",
+        wpPostId: input.wpPostId ?? null,
+        wpPostUrl: input.wpPostUrl ?? null,
+      });
+      return { success: true };
+    }),
+
+  /** Admin: re-run link QA on a submission */
+  runLinkQa: adminProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      const sub = await getPartnerSubmissionById(input.id);
+      if (!sub) throw new TRPCError({ code: "NOT_FOUND" });
+      const flagged = checkLinks(sub.declaredLinks ?? []);
+      const linkQaStatus = flagged.length > 0 ? "fail" as const : "pass" as const;
+      const linkQaDetails = flagged.length > 0
+        ? `Flagged links: ${flagged.join(", ")}`
+        : "All declared links passed blocklist check.";
+      await updatePartnerSubmission(input.id, { linkQaStatus, linkQaDetails });
+      return { linkQaStatus, linkQaDetails, flagged };
+    }),
+});
+
+// ─── App Router ──────────────────────────────────────────────────────
 
 export const appRouter = router({
   system: systemRouter,
@@ -859,6 +1007,7 @@ export const appRouter = router({
   wordpress: wordpressRouter,
   settings: settingsRouter,
   editors: editorsRouter,
+  partnerSubmissions: partnerSubmissionsRouter,
 });
 
 export type AppRouter = typeof appRouter;

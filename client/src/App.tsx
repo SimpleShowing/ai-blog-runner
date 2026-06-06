@@ -12,6 +12,8 @@ import Drafts from "./pages/Drafts";
 import DraftDetail from "./pages/DraftDetail";
 import Settings from "./pages/Settings";
 import PublishLog from "./pages/PublishLog";
+import PartnerSubmissions from "./pages/PartnerSubmissions";
+import PartnerSubmit from "./pages/PartnerSubmit";
 import { useAuth } from "./_core/hooks/useAuth";
 import { getLoginUrl } from "./const";
 import DashboardLayout from "./components/DashboardLayout";
@@ -50,6 +52,8 @@ function Router() {
       <Route path="/drafts/:id" component={() => <ProtectedRoute component={DraftDetail} />} />
       <Route path="/publish-log" component={() => <ProtectedRoute component={PublishLog} />} />
       <Route path="/settings" component={() => <ProtectedRoute component={Settings} />} />
+      <Route path="/partner-submissions" component={() => <ProtectedRoute component={PartnerSubmissions} />} />
+      <Route path="/submit" component={PartnerSubmit} />
       <Route path="/login" component={Login} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />

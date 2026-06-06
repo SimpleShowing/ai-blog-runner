@@ -211,3 +211,52 @@ export const settings = mysqlTable("settings", {
 });
 
 export type Setting = typeof settings.$inferSelect;
+
+// ─── Partner Submissions ──────────────────────────────────────────────────────
+
+export const partnerSubmissions = mysqlTable("partner_submissions", {
+  id: int("id").autoincrement().primaryKey(),
+  // Partner identity
+  partnerName: varchar("partnerName", { length: 255 }).notNull(),
+  partnerEmail: varchar("partnerEmail", { length: 320 }).notNull(),
+  partnerCompany: varchar("partnerCompany", { length: 255 }),
+  // Article details
+  title: varchar("title", { length: 512 }).notNull(),
+  category: varchar("category", { length: 255 }),
+  submissionType: mysqlEnum("submissionType", [
+    "guest_post",       // full new article
+    "link_insertion",  // insert a do-follow link into existing article
+  ]).default("guest_post").notNull(),
+  // Content — one of three input modes
+  contentText: text("contentText"),          // pasted HTML/markdown
+  contentFileKey: varchar("contentFileKey", { length: 1024 }), // uploaded .docx S3 key
+  googleDocsUrl: varchar("googleDocsUrl", { length: 1024 }),   // Google Docs share link
+  // For link_insertion type: the target SimpleShowing article URL
+  targetArticleUrl: varchar("targetArticleUrl", { length: 1024 }),
+  // Declared outbound do-follow links (JSON array of {url, anchorText})
+  declaredLinks: json("declaredLinks").$type<Array<{ url: string; anchorText: string }>>()
+    .default([]).notNull(),
+  // Review
+  status: mysqlEnum("status", [
+    "pending",      // just submitted, awaiting review
+    "in_review",   // reviewer opened it
+    "approved",    // approved, ready to push to WP
+    "rejected",    // rejected with reason
+    "published",   // pushed to WordPress
+  ]).default("pending").notNull(),
+  reviewNotes: text("reviewNotes"),
+  reviewedBy: int("reviewedBy"),
+  reviewedAt: timestamp("reviewedAt"),
+  // Link QA flags (set by automated check)
+  linkQaStatus: mysqlEnum("linkQaStatus", ["pass", "warn", "fail"]),
+  linkQaDetails: text("linkQaDetails"),
+  // WordPress
+  wpPostId: int("wpPostId"),
+  wpPostUrl: varchar("wpPostUrl", { length: 1024 }),
+  // Timestamps
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type PartnerSubmission = typeof partnerSubmissions.$inferSelect;
+export type InsertPartnerSubmission = typeof partnerSubmissions.$inferInsert;

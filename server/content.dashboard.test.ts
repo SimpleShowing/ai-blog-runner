@@ -220,14 +220,12 @@ describe("drafts router", () => {
     expect(result).toEqual({ success: true });
   });
 
-  it("submits a draft for review and notifies owner", async () => {
+  it("submits a draft for review (no notification — only WP push triggers one)", async () => {
     const { notifyOwner } = await import("./_core/notification");
     const caller = appRouter.createCaller(makeCtx());
     const result = await caller.drafts.submitForReview({ id: 10, topicId: 1 });
     expect(result).toEqual({ success: true });
-    expect(notifyOwner).toHaveBeenCalledWith(expect.objectContaining({
-      title: expect.stringContaining("Review"),
-    }));
+    expect(notifyOwner).not.toHaveBeenCalled();
   });
 
   it("approves a draft (any authenticated user)", async () => {
