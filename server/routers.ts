@@ -119,7 +119,7 @@ const topicsRouter = router({
 const briefsRouter = router({
   getByTopic: protectedProcedure
     .input(z.object({ topicId: z.number() }))
-    .query(({ input }) => getBriefByTopicId(input.topicId)),
+    .query(async ({ input }) => (await getBriefByTopicId(input.topicId)) ?? null),
 
   generate: protectedProcedure
     .input(z.object({ topicId: z.number() }))
@@ -418,7 +418,7 @@ Return JSON with these exact keys:
 const qaRouter = router({
   getLatest: protectedProcedure
     .input(z.object({ draftId: z.number() }))
-    .query(({ input }) => getLatestQaForDraft(input.draftId)),
+    .query(async ({ input }) => (await getLatestQaForDraft(input.draftId)) ?? null),
 
   run: protectedProcedure
     .input(z.object({ draftId: z.number() }))
