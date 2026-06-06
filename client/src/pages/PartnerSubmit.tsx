@@ -7,10 +7,19 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Plus, Trash2, CheckCircle2, AlertTriangle, FileText, Link2, ExternalLink } from "lucide-react";
+import { Plus, Trash2, CheckCircle2, AlertTriangle, Link2, ExternalLink, Info } from "lucide-react";
+
+type LinkType = "do_follow" | "internal" | "authoritative";
+
+type DeclaredLink = {
+  url: string;
+  anchorText: string;
+  linkType: LinkType;
+};
 
 type FormData = {
   partnerName: string;
@@ -19,11 +28,12 @@ type FormData = {
   title: string;
   category: string;
   submissionType: "guest_post" | "link_insertion";
+  extraDfLink: boolean;
   contentMode: "paste" | "google_docs" | "docx";
   contentText: string;
   googleDocsUrl: string;
   targetArticleUrl: string;
-  declaredLinks: Array<{ url: string; anchorText: string }>;
+  declaredLinks: DeclaredLink[];
 };
 
 const CATEGORIES = [
@@ -32,6 +42,23 @@ const CATEGORIES = [
   "Interior Design", "Kitchen & Bath", "Financing & Mortgages",
   "Market Trends", "Neighborhood Guides", "Moving Tips", "Other",
 ];
+
+const LINK_TYPE_LABELS: Record<LinkType, string> = {
+  do_follow: "Do-Follow (your link)",
+  internal: "Internal (simpleshowing.com)",
+  authoritative: "Authoritative (external authority site)",
+};
+
+const LINK_TYPE_COLORS: Record<LinkType, string> = {
+  do_follow: "bg-blue-50 text-blue-700 border-blue-200",
+  internal: "bg-green-50 text-green-700 border-green-200",
+  authoritative: "bg-purple-50 text-purple-700 border-purple-200",
+};
+
+function getPricing(type: "guest_post" | "link_insertion", extraDf: boolean): number {
+  if (type === "link_insertion") return 125;
+  return extraDf ? 175 : 150;
+}
 
 export default function PartnerSubmit() {
   const [submitted, setSubmitted] = useState(false);
@@ -50,15 +77,31 @@ export default function PartnerSubmit() {
   } = useForm<FormData>({
     defaultValues: {
       submissionType: "guest_post",
+      extraDfLink: false,
       contentMode: "paste",
-      declaredLinks: [],
+      declaredLinks: [
+        { url: "", anchorText: "", linkType: "do_follow" },
+        { url: "", anchorText: "", linkType: "internal" },
+        { url: "", anchorText: "", linkType: "authoritative" },
+      ],
     },
   });
 
-  const { fields, append, remove } = useFieldArray({ control, name: "declaredLinks" });
+  const { fields, append, remove, update } = useFieldArray({ control, name: "declaredLinks" });
 
   const submissionType = watch("submissionType");
   const contentMode = watch("contentMode");
+  const extraDfLink = watch("extraDfLink");
+  const declaredLinks = watch("declaredLinks");
+
+  const price = getPricing(submissionType, extraDfLink);
+
+  // Validation helpers for guest_post link requirements
+  const hasDoFollow = declaredLinks.some(l => l.linkType === "do_follow");
+  const hasInternal = declaredLinks.some(l => l.linkType === "internal");
+  const hasAuthoritative = declaredLinks.some(l => l.linkType === "authoritative");
+  const doFollowCount = declaredLinks.filter(l => l.linkType === "do_follow").length;
+  const expectedDfCount = extraDfLink ? 2 : 1;
 
   const submitMutation = trpc.partnerSubmissions.submit.useMutation({
     onSuccess: (data) => {
@@ -89,6 +132,26 @@ export default function PartnerSubmit() {
   };
 
   const onSubmit = async (data: FormData) => {
+    // Guest post link validation
+    if (data.submissionType === "guest_post") {
+      const df = data.declaredLinks.filter(l => l.linkType === "do_follow").length;
+      const internal = data.declaredLinks.filter(l => l.linkType === "internal").length;
+      const auth = data.declaredLinks.filter(l => l.linkType === "authoritative").length;
+      const expectedDf = data.extraDfLink ? 2 : 1;
+      if (df !== expectedDf) {
+        toast.error(`You must declare exactly ${expectedDf} do-follow link${expectedDf > 1 ? "s" : ""}.`);
+        return;
+      }
+      if (internal < 1) {
+        toast.error("You must declare at least 1 internal SimpleShowing link.");
+        return;
+      }
+      if (auth < 1) {
+        toast.error("You must declare at least 1 authoritative external link.");
+        return;
+      }
+    }
+
     let finalContentText = data.contentMode === "paste" ? data.contentText || undefined : undefined;
     if (data.contentMode === "docx") {
       if (!docxFile) { toast.error("Please select a .docx file to upload."); return; }
@@ -96,6 +159,7 @@ export default function PartnerSubmit() {
       if (!extracted) return;
       finalContentText = extracted;
     }
+
     submitMutation.mutate({
       partnerName: data.partnerName,
       partnerEmail: data.partnerEmail,
@@ -103,6 +167,7 @@ export default function PartnerSubmit() {
       title: data.title,
       category: data.category || undefined,
       submissionType: data.submissionType,
+      extraDfLink: data.extraDfLink,
       contentText: finalContentText,
       googleDocsUrl: data.contentMode === "google_docs" ? data.googleDocsUrl || undefined : undefined,
       targetArticleUrl: data.submissionType === "link_insertion" ? data.targetArticleUrl || undefined : undefined,
@@ -119,19 +184,19 @@ export default function PartnerSubmit() {
               <CheckCircle2 className="h-16 w-16 text-green-500" />
             </div>
             <h2 className="text-2xl font-bold text-white">Submission Received!</h2>
-            <p className="text-slate-600">
+            <p className="text-slate-300">
               Thank you for your submission. Our team will review your article and get back to you
               within 2–3 business days.
             </p>
             {submissionId && (
-              <p className="text-sm text-slate-500">
-                Reference ID: <span className="font-mono font-semibold text-slate-700">#{submissionId}</span>
+              <p className="text-sm text-slate-400">
+                Reference ID: <span className="font-mono font-semibold text-slate-200">#{submissionId}</span>
               </p>
             )}
             <Separator />
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-slate-400">
               Questions? Email us at{" "}
-              <a href="mailto:hello@simpleshowing.com" className="text-blue-600 hover:underline">
+              <a href="mailto:hello@simpleshowing.com" className="text-blue-400 hover:underline">
                 hello@simpleshowing.com
               </a>
             </p>
@@ -178,9 +243,10 @@ export default function PartnerSubmit() {
                 <p className="font-semibold">Before you submit, please note:</p>
                 <ul className="list-disc list-inside space-y-0.5 text-teal-700">
                   <li>All content must be original and relevant to real estate, home improvement/decor, finance, or other related topics.</li>
+                  <li>Guest posts require 1 internal SimpleShowing link and 1 authoritative external link.</li>
                   <li>You must declare all do-follow outbound links in the form below.</li>
                   <li>Links to gambling, adult, pharmaceutical, or unrelated sites will be rejected.</li>
-                  <li>Our team reviews all submissions within 2–3 business days.</li>
+                  <li>Payment is due upon publication — you will receive an invoice when your article goes live.</li>
                 </ul>
               </div>
             </div>
@@ -229,11 +295,11 @@ export default function PartnerSubmit() {
             </CardContent>
           </Card>
 
-          {/* Submission Type */}
+          {/* Submission Type + Pricing */}
           <Card className="shadow-sm">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Submission Type</CardTitle>
-              <CardDescription>Choose whether you are submitting a full guest post or requesting a link insertion into an existing SimpleShowing article.</CardDescription>
+              <CardTitle className="text-base">Submission Type &amp; Pricing</CardTitle>
+              <CardDescription>Payment is invoiced after your article is published — no upfront payment required.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -248,16 +314,41 @@ export default function PartnerSubmit() {
                         : "border-slate-200 hover:border-slate-300 bg-white"
                     }`}
                   >
-                    <div className="font-semibold text-sm text-slate-900">
-                      {type === "guest_post" ? "Guest Post" : "Link Insertion"}
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold text-sm text-slate-900">
+                        {type === "guest_post" ? "Guest Post" : "Link Insertion"}
+                      </div>
+                      <span className="text-sm font-bold text-teal-700">
+                        {type === "link_insertion" ? "$125" : (extraDfLink && submissionType === "guest_post" ? "$175" : "$150")}
+                      </span>
                     </div>
                     <div className="text-xs text-slate-500 mt-0.5">
                       {type === "guest_post"
-                        ? "Submit a full original article to be published on the SimpleShowing blog."
+                        ? "Submit a full original article (1 DF link + internal + authoritative)."
                         : "Request a do-follow link inserted into an existing SimpleShowing article."}
                     </div>
                   </button>
                 ))}
+              </div>
+
+              {/* Extra DF link add-on — guest post only */}
+              {submissionType === "guest_post" && (
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium text-slate-800">Add a 2nd do-follow link <span className="text-teal-700 font-semibold">+$25</span></p>
+                    <p className="text-xs text-slate-500 mt-0.5">Includes a second do-follow link in your article. Total: <strong>$175</strong></p>
+                  </div>
+                  <Switch
+                    checked={extraDfLink}
+                    onCheckedChange={(v) => setValue("extraDfLink", v)}
+                  />
+                </div>
+              )}
+
+              {/* Price summary */}
+              <div className="flex items-center justify-between rounded-lg bg-teal-600 text-white px-4 py-3">
+                <span className="text-sm font-medium">Your total (due after publication)</span>
+                <span className="text-xl font-bold">${price}</span>
               </div>
 
               {submissionType === "link_insertion" && (
@@ -387,24 +478,80 @@ export default function PartnerSubmit() {
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <Link2 className="h-4 w-4" />
-                Declare All Do-Follow Outbound Links
+                Declare All Links
               </CardTitle>
               <CardDescription>
-                You must list every do-follow link you want included. Undisclosed links found during review will result in rejection.
+                {submissionType === "guest_post"
+                  ? `Guest posts require: ${expectedDfCount} do-follow link${expectedDfCount > 1 ? "s" : ""} (yours), 1 internal SimpleShowing link, and 1 authoritative external link.`
+                  : "Declare the do-follow link you want inserted."}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+              {/* Link requirement checklist for guest posts */}
+              {submissionType === "guest_post" && (
+                <div className="flex flex-wrap gap-2 mb-2">
+                  <span className={`text-xs px-2 py-1 rounded-full border font-medium ${doFollowCount >= expectedDfCount ? "bg-green-50 text-green-700 border-green-200" : "bg-slate-100 text-slate-500 border-slate-200"}`}>
+                    {doFollowCount >= expectedDfCount ? "✓" : "○"} {expectedDfCount} do-follow link{expectedDfCount > 1 ? "s" : ""}
+                  </span>
+                  <span className={`text-xs px-2 py-1 rounded-full border font-medium ${hasInternal ? "bg-green-50 text-green-700 border-green-200" : "bg-slate-100 text-slate-500 border-slate-200"}`}>
+                    {hasInternal ? "✓" : "○"} 1 internal link
+                  </span>
+                  <span className={`text-xs px-2 py-1 rounded-full border font-medium ${hasAuthoritative ? "bg-green-50 text-green-700 border-green-200" : "bg-slate-100 text-slate-500 border-slate-200"}`}>
+                    {hasAuthoritative ? "✓" : "○"} 1 authoritative link
+                  </span>
+                </div>
+              )}
+
               {fields.length === 0 && (
                 <p className="text-sm text-slate-400 italic">No links declared yet. Click &quot;Add Link&quot; to add one.</p>
               )}
+
               {fields.map((field, index) => (
-                <div key={field.id} className="flex gap-2 items-start">
-                  <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div key={field.id} className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex gap-1.5 flex-wrap">
+                      {(["do_follow", "internal", "authoritative"] as LinkType[]).map((lt) => (
+                        <button
+                          key={lt}
+                          type="button"
+                          onClick={() => update(index, { ...field, ...watch(`declaredLinks.${index}`), linkType: lt })}
+                          className={`text-xs px-2 py-0.5 rounded-full border font-medium transition-all ${
+                            watch(`declaredLinks.${index}.linkType`) === lt
+                              ? LINK_TYPE_COLORS[lt]
+                              : "bg-white text-slate-500 border-slate-200 hover:border-slate-300"
+                          }`}
+                        >
+                          {lt === "do_follow" ? "Do-Follow" : lt === "internal" ? "Internal" : "Authoritative"}
+                        </button>
+                      ))}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="text-red-400 hover:text-red-600 hover:bg-red-50 flex-shrink-0 h-7 w-7"
+                      onClick={() => remove(index)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <Input
-                      placeholder="https://example.com/page"
+                      placeholder={
+                        watch(`declaredLinks.${index}.linkType`) === "internal"
+                          ? "https://www.simpleshowing.com/blog/..."
+                          : "https://example.com/page"
+                      }
                       {...register(`declaredLinks.${index}.url`, {
                         required: "URL is required",
                         pattern: { value: /^https?:\/\/.+/, message: "Must be a valid URL" },
+                        validate: (val) => {
+                          const lt = watch(`declaredLinks.${index}.linkType`);
+                          if (lt === "internal" && !val.includes("simpleshowing.com")) {
+                            return "Internal links must point to simpleshowing.com";
+                          }
+                          return true;
+                        },
                       })}
                     />
                     <Input
@@ -412,22 +559,27 @@ export default function PartnerSubmit() {
                       {...register(`declaredLinks.${index}.anchorText`, { required: "Anchor text is required" })}
                     />
                   </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="text-red-400 hover:text-red-600 hover:bg-red-50 flex-shrink-0"
-                    onClick={() => remove(index)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  {errors.declaredLinks?.[index]?.url && (
+                    <p className="text-xs text-red-500">{errors.declaredLinks[index]?.url?.message}</p>
+                  )}
+                  {watch(`declaredLinks.${index}.linkType`) === "internal" && (
+                    <p className="text-xs text-green-600 flex items-center gap-1">
+                      <Info className="h-3 w-3" /> Must link to a page on simpleshowing.com
+                    </p>
+                  )}
+                  {watch(`declaredLinks.${index}.linkType`) === "authoritative" && (
+                    <p className="text-xs text-purple-600 flex items-center gap-1">
+                      <Info className="h-3 w-3" /> Should be a well-known authority site (Wikipedia, .gov, major publications, etc.)
+                    </p>
+                  )}
                 </div>
               ))}
+
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => append({ url: "", anchorText: "" })}
+                onClick={() => append({ url: "", anchorText: "", linkType: "do_follow" })}
                 className="gap-1.5"
               >
                 <Plus className="h-3.5 w-3.5" />
@@ -439,14 +591,14 @@ export default function PartnerSubmit() {
           {/* Submit */}
           <div className="flex items-center justify-between pb-10">
             <p className="text-xs text-slate-400">
-              By submitting, you confirm this content is original and you have the right to publish it.
+              By submitting, you confirm this content is original and you have the right to publish it. Payment of <strong>${price}</strong> is due upon publication.
             </p>
             <Button
               type="submit"
-              disabled={isSubmitting || submitMutation.isPending}
+              disabled={isSubmitting || submitMutation.isPending || docxUploading}
               className="bg-teal-600 hover:bg-teal-700 text-white px-8"
             >
-              {submitMutation.isPending ? "Submitting..." : "Submit Article"}
+              {submitMutation.isPending || docxUploading ? "Submitting..." : "Submit Article"}
             </Button>
           </div>
         </form>

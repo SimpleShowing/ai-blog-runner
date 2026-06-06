@@ -101,17 +101,29 @@ export async function sendPartnerRejected(opts: {
   }
 }
 
-/** Published email sent when the article goes live on WordPress. */
+/** Published email sent when the article goes live on WordPress. Includes payment link if provided. */
 export async function sendPartnerPublished(opts: {
   to: string;
   partnerName: string;
   title: string;
   referenceId: number;
   wpPostUrl: string;
+  paymentLinkUrl?: string;
+  amountCents?: number;
 }): Promise<void> {
   try {
     const resend = getResend();
     if (!resend) return;
+    const amount = opts.amountCents ? `$${(opts.amountCents / 100).toFixed(2)}` : null;
+    const paymentSection = opts.paymentLinkUrl && amount
+      ? `
+        <hr style="margin:24px 0;border:none;border-top:1px solid #e5e7eb"/>
+        <p><strong>Payment due: ${amount}</strong></p>
+        <p>As a reminder, payment for your article placement is due upon publication. Please use the secure link below to complete your payment at your earliest convenience.</p>
+        <p><a href="${opts.paymentLinkUrl}" style="background:#2563eb;color:white;padding:10px 20px;text-decoration:none;border-radius:4px;display:inline-block">Pay Now — ${amount}</a></p>
+        <p style="font-size:12px;color:#6b7280">If you have any questions about payment, please reply to this email.</p>
+      `
+      : "";
     await resend.emails.send({
       from: FROM,
       to: opts.to,
@@ -122,10 +134,113 @@ export async function sendPartnerPublished(opts: {
         <p><strong>Article:</strong> ${opts.title}<br/>
         <strong>Live URL:</strong> <a href="${opts.wpPostUrl}">${opts.wpPostUrl}</a></p>
         <p>Feel free to share the link with your audience. Thank you for contributing to SimpleShowing!</p>
+        ${paymentSection}
         <p>Best,<br/>The SimpleShowing Team</p>
       `,
     });
   } catch (err) {
     console.error("[email] sendPartnerPublished failed:", err);
+  }
+}
+
+/** Payment received confirmation — sent after Stripe webhook confirms payment. */
+export async function sendPartnerPaymentReceived(opts: {
+  to: string;
+  partnerName: string;
+  articleTitle: string;
+  amountCents: number;
+  wpPostUrl: string;
+}): Promise<void> {
+  try {
+    const resend = getResend();
+    if (!resend) return;
+    const amount = `$${(opts.amountCents / 100).toFixed(2)}`;
+    await resend.emails.send({
+      from: FROM,
+      to: opts.to,
+      subject: `Payment received — thank you!`,
+      html: `
+        <p>Hi ${opts.partnerName},</p>
+        <p>We've received your payment of <strong>${amount}</strong> for your article placement on SimpleShowing. Thank you!</p>
+        <p><strong>Article:</strong> <a href="${opts.wpPostUrl}">${opts.articleTitle}</a></p>
+        <p>Your article will remain live on the SimpleShowing blog. If you have any questions, please reply to this email.</p>
+        <p>Best,<br/>The SimpleShowing Team</p>
+      `,
+    });
+  } catch (err) {
+    console.error("[email] sendPartnerPaymentReceived failed:", err);
+  }
+}
+
+/** Payment reminder email — sent at day 3, 5, or 7 after publication. */
+export async function sendPartnerPaymentReminder(opts: {
+  to: string;
+  partnerName: string;
+  articleTitle: string;
+  amountCents: number;
+  wpPostUrl: string;
+  paymentLinkUrl: string;
+  dayNumber: 3 | 5 | 7;
+}): Promise<void> {
+  try {
+    const resend = getResend();
+    if (!resend) return;
+    const amount = `$${(opts.amountCents / 100).toFixed(2)}`;
+    const isUrgent = opts.dayNumber === 7;
+    const subject = isUrgent
+      ? `Action required: Your article will be removed today — "${opts.articleTitle}"`
+      : `Reminder: Payment due for your SimpleShowing article`;
+    const urgencyNote = isUrgent
+      ? `<p style="color:#c0392b"><strong>⚠️ This is your final notice. Your article will be removed from SimpleShowing today unless payment is received.</strong></p>`
+      : opts.dayNumber === 5
+      ? `<p><strong>This is your second reminder.</strong> Please complete payment to keep your article live.</p>`
+      : `<p>This is a friendly reminder that payment is still outstanding for your article placement.</p>`;
+    await resend.emails.send({
+      from: FROM,
+      to: opts.to,
+      subject,
+      html: `
+        <p>Hi ${opts.partnerName},</p>
+        ${urgencyNote}
+        <p><strong>Article:</strong> <a href="${opts.wpPostUrl}">${opts.articleTitle}</a><br/>
+        <strong>Amount due:</strong> ${amount}</p>
+        <p><a href="${opts.paymentLinkUrl}" style="background:#2563eb;color:white;padding:10px 20px;text-decoration:none;border-radius:4px;display:inline-block">Pay Now — ${amount}</a></p>
+        <p>If you have any questions, please reply to this email.</p>
+        <p>Best,<br/>The SimpleShowing Team</p>
+      `,
+    });
+  } catch (err) {
+    console.error("[email] sendPartnerPaymentReminder failed:", err);
+  }
+}
+
+/** Removal notice — sent at day 7 when article is unpublished due to non-payment. */
+export async function sendPartnerRemovedUnpaid(opts: {
+  to: string;
+  partnerName: string;
+  articleTitle: string;
+  amountCents: number;
+  paymentLinkUrl: string;
+}): Promise<void> {
+  try {
+    const resend = getResend();
+    if (!resend) return;
+    const amount = `$${(opts.amountCents / 100).toFixed(2)}`;
+    await resend.emails.send({
+      from: FROM,
+      to: opts.to,
+      subject: `Your article has been removed — "${opts.articleTitle}"`,
+      html: `
+        <p>Hi ${opts.partnerName},</p>
+        <p>We're writing to let you know that your article <strong>"${opts.articleTitle}"</strong> has been removed from the SimpleShowing blog due to outstanding payment of <strong>${amount}</strong>.</p>
+        <p>To restore your article, please complete payment using the link below:</p>
+        <p><a href="${opts.paymentLinkUrl}" style="background:#2563eb;color:white;padding:10px 20px;text-decoration:none;border-radius:4px;display:inline-block">Pay ${amount} to Restore Article</a></p>
+        <p>Once payment is confirmed, your article will be reinstated within 24 hours.</p>
+        <p>If you have any questions or believe this was an error, please reply to this email.</p>
+        <p>Best,<br/>The SimpleShowing Team<br/>hello@simpleshowing.com</p>
+      `,
+    });
+  } catch (err) {
+    console.error("[email] sendPartnerRemovedUnpaid failed:", err);
   }
 }

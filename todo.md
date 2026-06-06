@@ -79,3 +79,21 @@
 - [x] Wire sendPartnerRejected into partnerSubmissions.reject procedure (includes review reason)
 - [x] Wire sendPartnerPublished into partnerSubmissions.markPublished procedure (includes live WP URL)
 - [x] Mock email module in Vitest; add email-assertion tests for all 4 stages (41 tests passing, 0 TS errors)
+
+## Phase 12: Stripe Pay-After-Publish Integration
+
+- [x] Run webdev_add_feature stripe scaffold
+- [x] Store STRIPE_SECRET_KEY and VITE_STRIPE_PUBLISHABLE_KEY as secrets
+- [x] Add payment fields to partner_submissions schema (amountCents, paymentStatus, stripePaymentLinkId, stripePaymentLinkUrl, publishedAt, paidAt, paymentGraceExtended, reminderDay3/5/7TaskUid, extraDfLink)
+- [x] Create server/stripe.ts with lazy Stripe client, PRICES constants, createPartnerPaymentLink, getPriceForSubmission
+- [x] Create server/stripeWebhook.ts — webhook handler for checkout.session.completed
+- [x] Create server/paymentReminders.ts — scheduled handler for day 3/5/7 reminders + auto-unpublish on day 7
+- [x] Create server/scheduleReminders.ts — schedules heartbeat jobs for day 3/5/7
+- [x] Register Stripe webhook route and payment reminder route in server/_core/index.ts
+- [x] Update submission form: 3-link enforcement for guest posts, link type fields, 2nd DF add-on toggle ($150 → $175), link insertion form
+- [x] Update markPublished procedure: create Stripe Payment Link, schedule reminders, return stripePaymentLinkUrl
+- [x] Update published email to include payment link and amount
+- [x] Add extendGrace and restorePublished procedures
+- [x] Update PartnerSubmissions dashboard: payment status badge, Mark as Published dialog, grace extension toggle, link QA checklist
+- [x] Add stripe/scheduleReminders mocks to test file, restore in beforeEach, add extendGrace/restorePublished tests
+- [x] 43 tests passing, 0 TypeScript errors

@@ -27,6 +27,8 @@ import {
   sendPartnerRejected,
   sendPartnerPublished,
 } from "./email";
+import { createPartnerPaymentLink, getPriceForSubmission } from "./stripe";
+import { schedulePaymentReminders } from "./scheduleReminders";
 
 // ─── Admin guard ──────────────────────────────────────────────────────────────
 
@@ -879,7 +881,9 @@ const partnerSubmissionsRouter = router({
       declaredLinks: z.array(z.object({
         url: z.string().url(),
         anchorText: z.string().max(255),
+        linkType: z.enum(["do_follow", "internal", "authoritative"]).optional(),
       })).default([]),
+      extraDfLink: z.boolean().default(false),
     }))
     .mutation(async ({ input }) => {
       // Run link QA immediately
@@ -889,6 +893,8 @@ const partnerSubmissionsRouter = router({
         ? `Flagged links: ${flagged.join(", ")}`
         : "All declared links passed blocklist check.";
 
+      const amountCents = getPriceForSubmission(input.submissionType ?? "guest_post", input.extraDfLink);
+
       const submission = await createPartnerSubmission({
         ...input,
         partnerCompany: input.partnerCompany ?? null,
@@ -897,6 +903,8 @@ const partnerSubmissionsRouter = router({
         googleDocsUrl: input.googleDocsUrl ?? null,
         targetArticleUrl: input.targetArticleUrl ?? null,
         declaredLinks: input.declaredLinks,
+        extraDfLink: input.extraDfLink,
+        amountCents,
         linkQaStatus,
         linkQaDetails,
         status: "pending",
@@ -991,29 +999,77 @@ const partnerSubmissionsRouter = router({
       return { success: true };
     }),
 
-  /** Admin: mark as published (after WP push) */
+  /** Admin: mark as published (after WP push) — creates Stripe Payment Link and schedules reminders */
   markPublished: adminProcedure
-    .input(z.object({ id: z.number(), wpPostId: z.number().optional(), wpPostUrl: z.string().optional() }))
+    .input(z.object({
+      id: z.number(),
+      wpPostId: z.number().optional(),
+      wpPostUrl: z.string().optional(),
+      origin: z.string().optional(),
+    }))
     .mutation(async ({ input }) => {
+      const pubSub = await getPartnerSubmissionById(input.id);
+      if (!pubSub) throw new TRPCError({ code: "NOT_FOUND" });
+
+      const publishedAt = new Date();
+      const successUrl = `${input.origin ?? "https://simpleblog.manus.space"}/payment-success`;
+
+      // Create Stripe Payment Link
+      let stripePaymentLinkId: string | undefined;
+      let stripePaymentLinkUrl: string | undefined;
+      try {
+        const link = await createPartnerPaymentLink({
+          submissionId: pubSub.id,
+          partnerEmail: pubSub.partnerEmail,
+          partnerName: pubSub.partnerName,
+          articleTitle: pubSub.title,
+          amountCents: pubSub.amountCents ?? getPriceForSubmission(pubSub.submissionType ?? "guest_post", pubSub.extraDfLink ?? false),
+          successUrl,
+        });
+        stripePaymentLinkId = link.id;
+        stripePaymentLinkUrl = link.url;
+      } catch (stripeErr) {
+        console.error("[markPublished] Stripe Payment Link creation failed:", stripeErr);
+      }
+
+      // Schedule payment reminder heartbeat jobs (day 3, 5, 7)
+      let reminderDay3TaskUid: string | undefined;
+      let reminderDay5TaskUid: string | undefined;
+      let reminderDay7TaskUid: string | undefined;
+      try {
+        const uids = await schedulePaymentReminders(pubSub.id, publishedAt);
+        reminderDay3TaskUid = uids.day3;
+        reminderDay5TaskUid = uids.day5;
+        reminderDay7TaskUid = uids.day7;
+      } catch (schedErr) {
+        console.error("[markPublished] Failed to schedule payment reminders:", schedErr);
+      }
+
       await updatePartnerSubmission(input.id, {
         status: "published",
         wpPostId: input.wpPostId ?? null,
         wpPostUrl: input.wpPostUrl ?? null,
+        publishedAt,
+        stripePaymentLinkId: stripePaymentLinkId ?? null,
+        stripePaymentLinkUrl: stripePaymentLinkUrl ?? null,
+        reminderDay3TaskUid: reminderDay3TaskUid ?? null,
+        reminderDay5TaskUid: reminderDay5TaskUid ?? null,
+        reminderDay7TaskUid: reminderDay7TaskUid ?? null,
       });
-      // Email partner: published with live URL
+
+      // Email partner: published with live URL + payment link
       if (input.wpPostUrl) {
-        const pubSub = await getPartnerSubmissionById(input.id);
-        if (pubSub) {
-          await sendPartnerPublished({
-            to: pubSub.partnerEmail,
-            partnerName: pubSub.partnerName,
-            title: pubSub.title,
-            referenceId: pubSub.id,
-            wpPostUrl: input.wpPostUrl,
-          });
-        }
+        await sendPartnerPublished({
+          to: pubSub.partnerEmail,
+          partnerName: pubSub.partnerName,
+          title: pubSub.title,
+          referenceId: pubSub.id,
+          wpPostUrl: input.wpPostUrl,
+          paymentLinkUrl: stripePaymentLinkUrl,
+          amountCents: pubSub.amountCents ?? getPriceForSubmission(pubSub.submissionType ?? "guest_post", pubSub.extraDfLink ?? false),
+        });
       }
-      return { success: true };
+      return { success: true, stripePaymentLinkUrl };
     }),
 
   /** Admin: re-run link QA on a submission */
@@ -1029,6 +1085,55 @@ const partnerSubmissionsRouter = router({
         : "All declared links passed blocklist check.";
       await updatePartnerSubmission(input.id, { linkQaStatus, linkQaDetails });
       return { linkQaStatus, linkQaDetails, flagged };
+    }),
+
+  /** Admin: extend payment grace period (pauses day-3/5/7 reminder sequence) */
+  extendGrace: adminProcedure
+    .input(z.object({ id: z.number(), extend: z.boolean() }))
+    .mutation(async ({ input }) => {
+      const sub = await getPartnerSubmissionById(input.id);
+      if (!sub) throw new TRPCError({ code: "NOT_FOUND" });
+      await updatePartnerSubmission(input.id, { paymentGraceExtended: input.extend });
+      return { success: true, paymentGraceExtended: input.extend };
+    }),
+
+  /** Admin: restore a day-7-unpublished post to published status (after manual payment confirmation) */
+  restorePublished: adminProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      const sub = await getPartnerSubmissionById(input.id);
+      if (!sub) throw new TRPCError({ code: "NOT_FOUND" });
+      // Restore WP post via REST API if credentials available
+      if (sub.wpPostId) {
+        try {
+          const wpUrl = await getSetting("wp_url");
+          const wpUser = await getSetting("wp_username");
+          const wpPass = await getSetting("wp_app_password");
+          if (wpUrl && wpUser && wpPass) {
+            const url = `${wpUrl.replace(/\/$/, "")}/wp-json/wp/v2/posts/${sub.wpPostId}`;
+            const res = await fetch(url, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Basic ${Buffer.from(`${wpUser}:${wpPass}`).toString("base64")}`,
+              },
+              body: JSON.stringify({ status: "publish" }),
+            });
+            if (!res.ok) {
+              const text = await res.text();
+              console.error(`[restorePublished] WP restore failed (${res.status}): ${text}`);
+            }
+          }
+        } catch (wpErr) {
+          console.error("[restorePublished] WP restore error:", wpErr);
+        }
+      }
+      await updatePartnerSubmission(input.id, {
+        status: "published",
+        paymentStatus: "paid",
+        paidAt: new Date(),
+      });
+      return { success: true };
     }),
 });
 

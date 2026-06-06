@@ -233,8 +233,10 @@ export const partnerSubmissions = mysqlTable("partner_submissions", {
   googleDocsUrl: varchar("googleDocsUrl", { length: 1024 }),   // Google Docs share link
   // For link_insertion type: the target SimpleShowing article URL
   targetArticleUrl: varchar("targetArticleUrl", { length: 1024 }),
-  // Declared outbound do-follow links (JSON array of {url, anchorText})
-  declaredLinks: json("declaredLinks").$type<Array<{ url: string; anchorText: string }>>()
+  // Extra do-follow link add-on (guest_post only)
+  extraDfLink: boolean("extraDfLink").default(false).notNull(),
+  // Declared links with type: do_follow | internal | authoritative
+  declaredLinks: json("declaredLinks").$type<Array<{ url: string; anchorText: string; linkType?: string }>>()
     .default([]).notNull(),
   // Review
   status: mysqlEnum("status", [
@@ -253,7 +255,24 @@ export const partnerSubmissions = mysqlTable("partner_submissions", {
   // WordPress
   wpPostId: int("wpPostId"),
   wpPostUrl: varchar("wpPostUrl", { length: 1024 }),
+  // Payment
+  amountCents: int("amountCents"),                           // price in cents (15000, 17500, 12500)
+  stripePaymentLinkId: varchar("stripePaymentLinkId", { length: 255 }),
+  stripePaymentLinkUrl: varchar("stripePaymentLinkUrl", { length: 1024 }),
+  stripeSessionId: varchar("stripeSessionId", { length: 255 }),
+  paymentStatus: mysqlEnum("paymentStatus", [
+    "unpaid",
+    "paid",
+    "refunded",
+  ]).default("unpaid"),
+  paidAt: timestamp("paidAt"),
+  paymentGraceExtended: boolean("paymentGraceExtended").default(false).notNull(),
+  // Scheduled reminder task UIDs
+  reminderDay3TaskUid: varchar("reminderDay3TaskUid", { length: 65 }),
+  reminderDay5TaskUid: varchar("reminderDay5TaskUid", { length: 65 }),
+  reminderDay7TaskUid: varchar("reminderDay7TaskUid", { length: 65 }),
   // Timestamps
+  publishedAt: timestamp("publishedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

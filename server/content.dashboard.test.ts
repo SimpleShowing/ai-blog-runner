@@ -138,6 +138,18 @@ vi.mock("./email", () => ({
   sendPartnerApproved: vi.fn(async () => {}),
   sendPartnerRejected: vi.fn(async () => {}),
   sendPartnerPublished: vi.fn(async () => {}),
+  sendPartnerPaymentReceived: vi.fn(async () => {}),
+  sendPartnerPaymentReminder: vi.fn(async () => {}),
+  sendPartnerRemovedUnpaid: vi.fn(async () => {}),
+}));
+
+vi.mock("./stripe", () => ({
+  createPartnerPaymentLink: vi.fn(async () => ({ id: "plink_test_123", url: "https://buy.stripe.com/test_123" })),
+  getPriceForSubmission: vi.fn(() => 15000),
+}));
+
+vi.mock("./scheduleReminders", () => ({
+  schedulePaymentReminders: vi.fn(async () => ({ day3: "uid-d3", day5: "uid-d5", day7: "uid-d7" })),
 }));
 
 // ─── Context helpers ──────────────────────────────────────────────────────────
@@ -522,6 +534,8 @@ describe("wordpress.push", () => {
 // Import DB module for partner submission mocks (already imported above as _wpPushDbMod)
 const _partnerDbMod = _wpPushDbMod;
 const _emailMod = await import("./email");
+const _stripeMod = await import("./stripe");
+const _scheduleMod = await import("./scheduleReminders");
 
 const MOCK_SUBMISSION = {
   id: 1,
@@ -544,6 +558,17 @@ const MOCK_SUBMISSION = {
   reviewedAt: null,
   wpPostId: null,
   wpPostUrl: null,
+  publishedAt: null,
+  amountCents: null,
+  paymentStatus: null,
+  stripePaymentLinkId: null,
+  stripePaymentLinkUrl: null,
+  paymentGraceExtended: false,
+  paidAt: null,
+  reminderDay3TaskUid: null,
+  reminderDay5TaskUid: null,
+  reminderDay7TaskUid: null,
+  extraDfLink: false,
   createdAt: new Date(),
   updatedAt: new Date(),
 };
@@ -558,6 +583,10 @@ describe("partnerSubmissions router", () => {
     (_emailMod.sendPartnerApproved as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
     (_emailMod.sendPartnerRejected as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
     (_emailMod.sendPartnerPublished as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    // Restore Stripe and schedule mocks
+    (_stripeMod.createPartnerPaymentLink as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "plink_test_123", url: "https://buy.stripe.com/test_123" });
+    (_stripeMod.getPriceForSubmission as ReturnType<typeof vi.fn>).mockReturnValue(15000);
+    (_scheduleMod.schedulePaymentReminders as ReturnType<typeof vi.fn>).mockResolvedValue({ day3: "uid-d3", day5: "uid-d5", day7: "uid-d7" });
     // Restore partner DB mocks
     (_partnerDbMod.createPartnerSubmission as ReturnType<typeof vi.fn>).mockResolvedValue(MOCK_SUBMISSION);
     (_partnerDbMod.getPartnerSubmissions as ReturnType<typeof vi.fn>).mockResolvedValue([MOCK_SUBMISSION]);
@@ -655,23 +684,52 @@ describe("partnerSubmissions router", () => {
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
-  it("markPublished: marks submission as published and emails partner with live URL", async () => {
+  it("markPublished: marks submission as published, creates Stripe payment link, and emails partner", async () => {
     const caller = appRouter.createCaller(makeCtx());
     const result = await caller.partnerSubmissions.markPublished({
       id: 1,
       wpPostId: 999,
       wpPostUrl: "https://www.simpleshowing.com/blog/home-improvement-tips",
+      origin: "https://simpleblog.manus.space",
     });
-    expect(result).toEqual({ success: true });
+    expect(result.success).toBe(true);
+    expect(result.stripePaymentLinkUrl).toBe("https://buy.stripe.com/test_123");
     expect(_partnerDbMod.updatePartnerSubmission).toHaveBeenCalledWith(
       1,
-      expect.objectContaining({ status: "published", wpPostUrl: "https://www.simpleshowing.com/blog/home-improvement-tips" })
+      expect.objectContaining({
+        status: "published",
+        wpPostUrl: "https://www.simpleshowing.com/blog/home-improvement-tips",
+        stripePaymentLinkUrl: "https://buy.stripe.com/test_123",
+      })
     );
     expect(_emailMod.sendPartnerPublished).toHaveBeenCalledWith(
       expect.objectContaining({
         to: MOCK_SUBMISSION.partnerEmail,
         wpPostUrl: "https://www.simpleshowing.com/blog/home-improvement-tips",
+        paymentLinkUrl: "https://buy.stripe.com/test_123",
       })
+    );
+  });
+
+  it("extendGrace: toggles grace period extension on a submission", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    const result = await caller.partnerSubmissions.extendGrace({ id: 1, extend: true });
+    expect(result).toEqual({ success: true, paymentGraceExtended: true });
+    expect(_partnerDbMod.updatePartnerSubmission).toHaveBeenCalledWith(1, { paymentGraceExtended: true });
+  });
+
+  it("restorePublished: marks submission as published and paid", async () => {
+    (_partnerDbMod.getPartnerSubmissionById as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...MOCK_SUBMISSION,
+      status: "published",
+      wpPostId: null, // no WP ID so no WP API call needed in test
+    });
+    const caller = appRouter.createCaller(makeCtx());
+    const result = await caller.partnerSubmissions.restorePublished({ id: 1 });
+    expect(result).toEqual({ success: true });
+    expect(_partnerDbMod.updatePartnerSubmission).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ status: "published", paymentStatus: "paid" })
     );
   });
 

@@ -10,6 +10,8 @@ import { registerDocxUploadRoute } from "../docxUpload";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { stripeWebhookHandler } from "../stripeWebhook";
+import { paymentReminderHandler } from "../paymentReminders";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -36,6 +38,10 @@ async function startServer() {
   // Trust the load balancer / reverse proxy (Cloud Run, etc.) so that
   // req.protocol reflects x-forwarded-proto and cookies are set correctly.
   app.set("trust proxy", 1);
+  // Stripe webhook MUST use raw body — register BEFORE express.json()
+  app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), stripeWebhookHandler);
+  // Scheduled payment reminder handler
+  app.post("/api/scheduled/paymentReminder", paymentReminderHandler);
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
