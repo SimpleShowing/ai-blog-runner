@@ -1,4 +1,4 @@
-import { eq, desc, and, like, inArray } from "drizzle-orm";
+import { eq, desc, and, isNotNull, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertUser,
@@ -390,4 +390,31 @@ export async function updatePartnerSubmission(
     .update(partnerSubmissions)
     .set(data)
     .where(eq(partnerSubmissions.id, id));
+}
+
+/** All submissions that have been published (have a publishedAt timestamp), ordered by most recently published. */
+export async function getPublishedSubmissionsWithPayment(): Promise<PartnerSubmission[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(partnerSubmissions)
+    .where(isNotNull(partnerSubmissions.publishedAt))
+    .orderBy(desc(partnerSubmissions.publishedAt));
+}
+
+/** Published submissions where payment is not yet confirmed (paymentStatus != 'paid'). */
+export async function getUnpaidSubmissions(): Promise<PartnerSubmission[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(partnerSubmissions)
+    .where(
+      and(
+        isNotNull(partnerSubmissions.publishedAt),
+        ne(partnerSubmissions.paymentStatus, "paid")
+      )
+    )
+    .orderBy(desc(partnerSubmissions.publishedAt));
 }

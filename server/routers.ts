@@ -17,6 +17,7 @@ import {
   getInvitedEditors, inviteEditor, removeEditor,
   getAllUsers,
   createPartnerSubmission, getPartnerSubmissions, getPartnerSubmissionById, updatePartnerSubmission,
+  getPublishedSubmissionsWithPayment, getUnpaidSubmissions,
 } from "./db";
 import { ENV } from "./_core/env";
 import { generateImage } from "./_core/imageGeneration";
@@ -1097,6 +1098,40 @@ const partnerSubmissionsRouter = router({
       return { success: true, paymentGraceExtended: input.extend };
     }),
 
+  /** Admin: manually mark a submission as removed due to non-payment (sets status to rejected, notes the reason) */
+  markRemovedUnpaid: adminProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      const sub = await getPartnerSubmissionById(input.id);
+      if (!sub) throw new TRPCError({ code: "NOT_FOUND" });
+      // Attempt to set WP post to draft if credentials available
+      if (sub.wpPostId) {
+        try {
+          const wpUrl = await getSetting("wp_url");
+          const wpUser = await getSetting("wp_username");
+          const wpPass = await getSetting("wp_app_password");
+          if (wpUrl && wpUser && wpPass) {
+            const url = `${wpUrl.replace(/\/$/, "")}/wp-json/wp/v2/posts/${sub.wpPostId}`;
+            await fetch(url, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Basic ${Buffer.from(`${wpUser}:${wpPass}`).toString("base64")}`,
+              },
+              body: JSON.stringify({ status: "draft" }),
+            });
+          }
+        } catch (wpErr) {
+          console.error("[markRemovedUnpaid] WP draft error:", wpErr);
+        }
+      }
+      await updatePartnerSubmission(input.id, {
+        status: "rejected",
+        reviewNotes: (sub.reviewNotes ? sub.reviewNotes + "\n" : "") + "Removed: non-payment after publication.",
+      });
+      return { success: true };
+    }),
+
   /** Admin: restore a day-7-unpublished post to published status (after manual payment confirmation) */
   restorePublished: adminProcedure
     .input(z.object({ id: z.number() }))
@@ -1137,6 +1172,19 @@ const partnerSubmissionsRouter = router({
     }),
 });
 
+// ─── Payments Router ────────────────────────────────────────────────
+
+const paymentsRouter = router({
+  /** All published partner submissions with payment info */
+  list: adminProcedure.query(async () => {
+    return getPublishedSubmissionsWithPayment();
+  }),
+  /** Published submissions where payment has not been confirmed */
+  listUnpaid: adminProcedure.query(async () => {
+    return getUnpaidSubmissions();
+  }),
+});
+
 // ─── App Router ──────────────────────────────────────────────────────
 
 export const appRouter = router({
@@ -1158,6 +1206,7 @@ export const appRouter = router({
   settings: settingsRouter,
   editors: editorsRouter,
   partnerSubmissions: partnerSubmissionsRouter,
+  payments: paymentsRouter,
 });
 
 export type AppRouter = typeof appRouter;

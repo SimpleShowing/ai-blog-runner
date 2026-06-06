@@ -97,3 +97,12 @@
 - [x] Update PartnerSubmissions dashboard: payment status badge, Mark as Published dialog, grace extension toggle, link QA checklist
 - [x] Add stripe/scheduleReminders mocks to test file, restore in beforeEach, add extendGrace/restorePublished tests
 - [x] 43 tests passing, 0 TypeScript errors
+
+## Phase 13: Payments Dashboard Tab
+
+- [x] Add "Payments" nav item to DashboardLayout sidebar
+- [x] Create /payments page with two tabs: "All Payments" and "Unpaid / Overdue"
+- [x] All Payments tab: table of all partner submissions with payment status badge, amount, published date, paid date, Stripe Payment Link button
+- [x] Unpaid/Overdue tab: filter to submissions where paymentStatus != 'paid' and publishedAt is set — show days overdue, reminder status (day 3/5/7 sent), grace extended badge, quick actions (extend grace, copy payment link, mark removed)
+- [x] Add tRPC procedures: payments.list (admin) returning all published submissions with payment fields, payments.listUnpaid (admin) returning unpaid/overdue submissions
+- [x] Add server/db.ts helpers: getPublishedSubmissionsWithPayment, getUnpaidSubmissions
