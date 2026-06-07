@@ -2,7 +2,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { getLoginUrl } from "@/const";
 import { Link, useLocation } from "wouter";
-import { Loader2, LayoutDashboard, ListChecks, FileText, Send, Settings, LogOut, ChevronRight, Sparkles, Menu, X, Users, CreditCard } from "lucide-react";
+import { Loader2, LayoutDashboard, ListChecks, FileText, Send, Settings, LogOut, ChevronRight, Sparkles, Menu, X, Users, CreditCard, Rss } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -15,6 +15,7 @@ const navItems = [
   { href: "/publish-log", icon: Send, label: "Publish Log" },
   { href: "/partner-submissions", icon: Users, label: "Partner Submissions" },
   { href: "/payments", icon: CreditCard, label: "Payments" },
+  { href: "/content-pipeline", icon: Rss, label: "Content Pipeline" },
   { href: "/settings", icon: Settings, label: "Settings" },
 ];
 

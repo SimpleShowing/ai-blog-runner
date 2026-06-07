@@ -18,6 +18,8 @@ import {
   getAllUsers,
   createPartnerSubmission, getPartnerSubmissions, getPartnerSubmissionById, updatePartnerSubmission,
   getPublishedSubmissionsWithPayment, getUnpaidSubmissions,
+  getBlogTopics, countBlogTopics, getNextPendingBlogTopic, updateBlogTopicStatus, bulkInsertBlogTopics,
+  getGeneratedPosts, countGeneratedPosts,
 } from "./db";
 import { ENV } from "./_core/env";
 import { generateImage } from "./_core/imageGeneration";
@@ -1185,6 +1187,132 @@ const paymentsRouter = router({
   }),
 });
 
+// ─── Blog Pipeline Router ───────────────────────────────────────────────────
+
+import { createHeartbeatJob, listHeartbeatJobs } from "./_core/heartbeat";
+import { parse as parseCookie } from "cookie";
+
+const BLOG_PIPELINE_JOB_NAME = "daily-blog-post-generator";
+
+const blogPipelineRouter = router({
+  /** List topics with optional filters */
+  listTopics: adminProcedure
+    .input(z.object({
+      status: z.enum(["pending", "used", "skipped"]).optional(),
+      contentType: z.enum(["informational", "lead_gen", "affiliate", "comparison"]).optional(),
+      limit: z.number().min(1).max(200).default(50),
+      offset: z.number().min(0).default(0),
+    }))
+    .query(async ({ input }) => {
+      const [topics, total] = await Promise.all([
+        getBlogTopics(input),
+        countBlogTopics({ status: input.status, contentType: input.contentType }),
+      ]);
+      return { topics, total };
+    }),
+
+  /** Update a topic's status (e.g. skip it) */
+  updateTopicStatus: adminProcedure
+    .input(z.object({
+      id: z.number(),
+      status: z.enum(["pending", "used", "skipped"]),
+    }))
+    .mutation(async ({ input }) => {
+      await updateBlogTopicStatus(input.id, input.status);
+      return { success: true };
+    }),
+
+  /** List generated posts with optional filters */
+  listPosts: adminProcedure
+    .input(z.object({
+      contentType: z.enum(["informational", "lead_gen", "affiliate", "comparison"]).optional(),
+      status: z.enum(["generating", "published", "failed"]).optional(),
+      affiliateFlag: z.boolean().optional(),
+      limit: z.number().min(1).max(200).default(50),
+      offset: z.number().min(0).default(0),
+    }))
+    .query(async ({ input }) => {
+      const [posts, total] = await Promise.all([
+        getGeneratedPosts(input),
+        countGeneratedPosts({ contentType: input.contentType, status: input.status }),
+      ]);
+      return { posts, total };
+    }),
+
+  /** Seed the topic queue from the combined_topics JSON (admin only, one-time) */
+  seedTopics: adminProcedure
+    .input(z.object({
+      topics: z.array(z.object({
+        keyword: z.string(),
+        sourceUrl: z.string().optional(),
+        traffic: z.number().default(0),
+        kwVolume: z.number().default(0),
+        contentType: z.enum(["informational", "lead_gen", "affiliate", "comparison"]),
+        source: z.enum(["clever", "houzeo", "manual"]),
+      })),
+    }))
+    .mutation(async ({ input }) => {
+      const rows = input.topics.map((t, i) => ({
+        keyword: t.keyword,
+        sourceUrl: t.sourceUrl ?? null,
+        traffic: t.traffic,
+        kwVolume: t.kwVolume,
+        contentType: t.contentType,
+        source: t.source,
+        status: "pending" as const,
+        priority: t.traffic, // use traffic as initial priority
+      }));
+      const inserted = await bulkInsertBlogTopics(rows);
+      return { inserted };
+    }),
+
+  /** Get topic queue stats */
+  stats: adminProcedure.query(async () => {
+    const [pending, used, skipped, totalPosts, affiliatePosts] = await Promise.all([
+      countBlogTopics({ status: "pending" }),
+      countBlogTopics({ status: "used" }),
+      countBlogTopics({ status: "skipped" }),
+      countGeneratedPosts(),
+      countGeneratedPosts({ status: "published" }),
+    ]);
+    return { pending, used, skipped, totalPosts, publishedPosts: affiliatePosts };
+  }),
+
+  /** Create or verify the daily 8am UTC heartbeat job */
+  setupDailyJob: adminProcedure.mutation(async ({ ctx }) => {
+    const sessionToken = parseCookie(ctx.req.headers.cookie ?? "")[COOKIE_NAME] ?? "";
+    // Check if job already exists
+    try {
+      const existing = await listHeartbeatJobs(sessionToken);
+      const found = existing.jobs.find(j => j.name === BLOG_PIPELINE_JOB_NAME);
+      if (found) {
+        return { created: false, taskUid: found.taskUid, nextExecutionAt: found.nextExecutionAt };
+      }
+    } catch { /* proceed to create */ }
+
+    const job = await createHeartbeatJob({
+      name: BLOG_PIPELINE_JOB_NAME,
+      cron: "0 0 8 * * *",  // 8:00 AM UTC daily
+      path: "/api/scheduled/blogPostGenerator",
+      description: "Daily automated blog post generation from topic queue",
+    }, sessionToken);
+
+    return { created: true, taskUid: job.taskUid, nextExecutionAt: job.nextExecutionAt };
+  }),
+
+  /** Get the status of the daily job */
+  getDailyJobStatus: adminProcedure.query(async ({ ctx }) => {
+    const sessionToken = parseCookie(ctx.req.headers.cookie ?? "")[COOKIE_NAME] ?? "";
+    try {
+      const existing = await listHeartbeatJobs(sessionToken);
+      const found = existing.jobs.find(j => j.name === BLOG_PIPELINE_JOB_NAME);
+      return found ?? null;
+    } catch {
+      return null;
+    }
+  }),
+});
+
 // ─── App Router ──────────────────────────────────────────────────────
 
 export const appRouter = router({
@@ -1207,6 +1335,7 @@ export const appRouter = router({
   editors: editorsRouter,
   partnerSubmissions: partnerSubmissionsRouter,
   payments: paymentsRouter,
+  blogPipeline: blogPipelineRouter,
 });
 
 export type AppRouter = typeof appRouter;

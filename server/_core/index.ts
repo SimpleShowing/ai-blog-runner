@@ -12,6 +12,7 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { stripeWebhookHandler } from "../stripeWebhook";
 import { paymentReminderHandler } from "../paymentReminders";
+import { blogPostGeneratorHandler } from "../blogPostGenerator";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -42,6 +43,8 @@ async function startServer() {
   app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), stripeWebhookHandler);
   // Scheduled payment reminder handler
   app.post("/api/scheduled/paymentReminder", paymentReminderHandler);
+  // Scheduled daily blog post generator
+  app.post("/api/scheduled/blogPostGenerator", blogPostGeneratorHandler);
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));

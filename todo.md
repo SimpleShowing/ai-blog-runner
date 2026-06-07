@@ -106,3 +106,17 @@
 - [x] Unpaid/Overdue tab: filter to submissions where paymentStatus != 'paid' and publishedAt is set — show days overdue, reminder status (day 3/5/7 sent), grace extended badge, quick actions (extend grace, copy payment link, mark removed)
 - [x] Add tRPC procedures: payments.list (admin) returning all published submissions with payment fields, payments.listUnpaid (admin) returning unpaid/overdue submissions
 - [x] Add server/db.ts helpers: getPublishedSubmissionsWithPayment, getUnpaidSubmissions
+
+## Phase 14: Automated Blog Post Pipeline
+
+- [x] Add blog_topics and generated_posts tables to drizzle/schema.ts
+- [x] Generate and apply migration SQL for new tables
+- [x] Add DB helpers: getBlogTopics, countBlogTopics, getNextPendingBlogTopic, updateBlogTopicStatus, bulkInsertBlogTopics, getGeneratedPosts, countGeneratedPosts, createGeneratedPost, updateGeneratedPost
+- [x] Create server/blogPostGenerator.ts — scheduled handler for daily AI post generation (picks next pending topic, calls LLM with editorial brief, publishes to WordPress, marks topic as used)
+- [x] Content-type-aware CTA strategy (lead_gen: home valuation CTA, affiliate: affiliate link placeholder, comparison: fair comparison with SimpleShowing mention, informational: 1 soft internal link)
+- [x] Register /api/scheduled/blogPostGenerator route in server/_core/index.ts
+- [x] Add blogPipeline tRPC router: listTopics, updateTopicStatus, listPosts, seedTopics, stats, setupDailyJob, getDailyJobStatus
+- [x] Add "Content Pipeline" nav item to DashboardLayout sidebar (Rss icon)
+- [x] Create /content-pipeline page: stats bar (pending/used/skipped/posts/published), daily job status + setup button, Topic Queue tab (filters: status, content type; skip/restore actions; pagination), Generated Posts tab (filters: type, status, affiliate-only; WP link; affiliate flag badge)
+- [x] Register /content-pipeline route in App.tsx
+- [x] Vitest tests: 8 new tests for blogPipeline router (51 total, all passing, 0 TS errors)

@@ -279,3 +279,51 @@ export const partnerSubmissions = mysqlTable("partner_submissions", {
 
 export type PartnerSubmission = typeof partnerSubmissions.$inferSelect;
 export type InsertPartnerSubmission = typeof partnerSubmissions.$inferInsert;
+
+// ─── Blog Topics (Automated Pipeline Queue) ──────────────────────────────────
+
+export const blogTopics = mysqlTable("blog_topics", {
+  id: int("id").autoincrement().primaryKey(),
+  keyword: varchar("keyword", { length: 512 }).notNull(),
+  sourceUrl: varchar("sourceUrl", { length: 1024 }),
+  traffic: int("traffic").default(0).notNull(),
+  kwVolume: int("kwVolume").default(0).notNull(),
+  contentType: mysqlEnum("contentType", [
+    "informational",
+    "lead_gen",
+    "affiliate",
+    "comparison",
+  ]).default("informational").notNull(),
+  source: mysqlEnum("source", ["clever", "houzeo", "manual"]).default("manual").notNull(),
+  status: mysqlEnum("status", ["pending", "used", "skipped"]).default("pending").notNull(),
+  priority: int("priority").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type BlogTopic = typeof blogTopics.$inferSelect;
+export type InsertBlogTopic = typeof blogTopics.$inferInsert;
+
+// ─── Generated Posts (Automated Pipeline Output) ─────────────────────────────
+
+export const generatedPosts = mysqlTable("generated_posts", {
+  id: int("id").autoincrement().primaryKey(),
+  topicId: int("topicId").notNull(),
+  title: varchar("title", { length: 512 }),
+  content: text("content"),
+  wpPostId: int("wpPostId"),
+  wpPostUrl: varchar("wpPostUrl", { length: 1024 }),
+  contentType: mysqlEnum("contentType", [
+    "informational",
+    "lead_gen",
+    "affiliate",
+    "comparison",
+  ]).default("informational").notNull(),
+  affiliateFlag: boolean("affiliateFlag").default(false).notNull(),
+  status: mysqlEnum("status", ["generating", "published", "failed"]).default("generating").notNull(),
+  errorMessage: text("errorMessage"),
+  publishedAt: timestamp("publishedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type GeneratedPost = typeof generatedPosts.$inferSelect;
+export type InsertGeneratedPost = typeof generatedPosts.$inferInsert;

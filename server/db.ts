@@ -418,3 +418,153 @@ export async function getUnpaidSubmissions(): Promise<PartnerSubmission[]> {
     )
     .orderBy(desc(partnerSubmissions.publishedAt));
 }
+
+// ─── Blog Topics ──────────────────────────────────────────────────────────────
+
+import {
+  blogTopics,
+  generatedPosts,
+  type BlogTopic,
+  type InsertBlogTopic,
+  type GeneratedPost,
+  type InsertGeneratedPost,
+} from "../drizzle/schema";
+import { asc, sql, lt } from "drizzle-orm";
+
+export async function bulkInsertBlogTopics(rows: InsertBlogTopic[]): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  if (rows.length === 0) return 0;
+  // Insert in batches of 500 to avoid packet size limits
+  const BATCH = 500;
+  let inserted = 0;
+  for (let i = 0; i < rows.length; i += BATCH) {
+    const batch = rows.slice(i, i + BATCH);
+    await db.insert(blogTopics).values(batch).onDuplicateKeyUpdate({ set: { keyword: sql`keyword` } });
+    inserted += batch.length;
+  }
+  return inserted;
+}
+
+export async function getBlogTopics(opts?: {
+  status?: BlogTopic["status"];
+  contentType?: BlogTopic["contentType"];
+  limit?: number;
+  offset?: number;
+}) {
+  const db = await getDb();
+  if (!db) return [];
+  let q = db.select().from(blogTopics).$dynamic();
+  const conditions = [];
+  if (opts?.status) conditions.push(eq(blogTopics.status, opts.status));
+  if (opts?.contentType) conditions.push(eq(blogTopics.contentType, opts.contentType));
+  if (conditions.length > 0) q = q.where(and(...conditions));
+  q = q.orderBy(desc(blogTopics.priority), desc(blogTopics.traffic));
+  if (opts?.limit) q = q.limit(opts.limit);
+  if (opts?.offset) q = q.offset(opts.offset);
+  return q;
+}
+
+export async function countBlogTopics(opts?: {
+  status?: BlogTopic["status"];
+  contentType?: BlogTopic["contentType"];
+}): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const conditions = [];
+  if (opts?.status) conditions.push(eq(blogTopics.status, opts.status));
+  if (opts?.contentType) conditions.push(eq(blogTopics.contentType, opts.contentType));
+  const result = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(blogTopics)
+    .where(conditions.length > 0 ? and(...conditions) : undefined);
+  return Number(result[0]?.count ?? 0);
+}
+
+export async function getNextPendingBlogTopic(): Promise<BlogTopic | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db
+    .select()
+    .from(blogTopics)
+    .where(eq(blogTopics.status, "pending"))
+    .orderBy(desc(blogTopics.priority), desc(blogTopics.traffic))
+    .limit(1);
+  return result[0] ?? null;
+}
+
+export async function updateBlogTopicStatus(id: number, status: BlogTopic["status"]): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(blogTopics).set({ status }).where(eq(blogTopics.id, id));
+}
+
+// ─── Generated Posts ──────────────────────────────────────────────────────────
+
+export async function createGeneratedPost(data: InsertGeneratedPost): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const [result] = await db.insert(generatedPosts).values(data);
+  return (result as { insertId: number }).insertId;
+}
+
+export async function updateGeneratedPost(id: number, data: Partial<InsertGeneratedPost>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(generatedPosts).set(data).where(eq(generatedPosts.id, id));
+}
+
+export async function getGeneratedPosts(opts?: {
+  contentType?: GeneratedPost["contentType"];
+  status?: GeneratedPost["status"];
+  affiliateFlag?: boolean;
+  limit?: number;
+  offset?: number;
+}) {
+  const db = await getDb();
+  if (!db) return [];
+  let q = db
+    .select({
+      id: generatedPosts.id,
+      topicId: generatedPosts.topicId,
+      title: generatedPosts.title,
+      wpPostId: generatedPosts.wpPostId,
+      wpPostUrl: generatedPosts.wpPostUrl,
+      contentType: generatedPosts.contentType,
+      affiliateFlag: generatedPosts.affiliateFlag,
+      status: generatedPosts.status,
+      errorMessage: generatedPosts.errorMessage,
+      publishedAt: generatedPosts.publishedAt,
+      createdAt: generatedPosts.createdAt,
+      keyword: blogTopics.keyword,
+      traffic: blogTopics.traffic,
+    })
+    .from(generatedPosts)
+    .leftJoin(blogTopics, eq(blogTopics.id, generatedPosts.topicId))
+    .$dynamic();
+  const conditions = [];
+  if (opts?.contentType) conditions.push(eq(generatedPosts.contentType, opts.contentType));
+  if (opts?.status) conditions.push(eq(generatedPosts.status, opts.status));
+  if (opts?.affiliateFlag !== undefined) conditions.push(eq(generatedPosts.affiliateFlag, opts.affiliateFlag));
+  if (conditions.length > 0) q = q.where(and(...conditions));
+  q = q.orderBy(desc(generatedPosts.createdAt));
+  if (opts?.limit) q = q.limit(opts.limit);
+  if (opts?.offset) q = q.offset(opts.offset);
+  return q;
+}
+
+export async function countGeneratedPosts(opts?: {
+  contentType?: GeneratedPost["contentType"];
+  status?: GeneratedPost["status"];
+}): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const conditions = [];
+  if (opts?.contentType) conditions.push(eq(generatedPosts.contentType, opts.contentType));
+  if (opts?.status) conditions.push(eq(generatedPosts.status, opts.status));
+  const result = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(generatedPosts)
+    .where(conditions.length > 0 ? and(...conditions) : undefined);
+  return Number(result[0]?.count ?? 0);
+}
