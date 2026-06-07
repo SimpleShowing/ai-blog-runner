@@ -1300,6 +1300,19 @@ const blogPipelineRouter = router({
     return { created: true, taskUid: job.taskUid, nextExecutionAt: job.nextExecutionAt };
   }),
 
+  /** Manually trigger post generation on-demand */
+  generateNow: adminProcedure.mutation(async () => {
+    const { runBlogPostGeneration } = await import("./blogPostGenerator");
+    const result = await runBlogPostGeneration();
+    if (!result.ok && "skipped" in result) {
+      return { ok: false as const, skipped: result.skipped };
+    }
+    if (!result.ok) {
+      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: (result as any).message || (result as any).error || "Generation failed" });
+    }
+    return { ok: true as const, postId: result.postId, wpPostId: result.wpPostId, wpPostUrl: result.wpPostUrl, title: result.title };
+  }),
+
   /** Get the status of the daily job */
   getDailyJobStatus: adminProcedure.query(async ({ ctx }) => {
     const sessionToken = parseCookie(ctx.req.headers.cookie ?? "")[COOKIE_NAME] ?? "";

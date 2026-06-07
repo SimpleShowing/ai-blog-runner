@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
-import DashboardLayout from "@/components/DashboardLayout";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,6 +23,7 @@ import {
   RotateCcw,
   ChevronLeft,
   ChevronRight,
+  Play,
 } from "lucide-react";
 
 // ─── Type helpers ─────────────────────────────────────────────────────────────
@@ -104,6 +104,32 @@ function StatsBar() {
   });
   const { data: jobStatus } = trpc.blogPipeline.getDailyJobStatus.useQuery();
 
+  const generateNow = trpc.blogPipeline.generateNow.useMutation({
+    onSuccess: (data) => {
+      if (!data.ok && "skipped" in data) {
+        const msg = data.skipped === "wp-credentials-missing"
+          ? "WordPress credentials not configured. Please add them in Settings."
+          : "No pending topics in the queue. Add topics first.";
+        toast.warning(msg);
+      } else if (data.ok) {
+        toast.success(
+          <span>
+            Published: <strong>{data.title}</strong>
+            {data.wpPostUrl && (
+              <a href={data.wpPostUrl} target="_blank" rel="noopener noreferrer" className="ml-2 underline">
+                View post
+              </a>
+            )}
+          </span>
+        );
+        utils.blogPipeline.stats.invalidate();
+        utils.blogPipeline.listPosts.invalidate();
+        utils.blogPipeline.listTopics.invalidate();
+      }
+    },
+    onError: (err) => toast.error(`Generation failed: ${err.message}`),
+  });
+
   if (isLoading) return (
     <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
       {Array.from({ length: 5 }).map((_, i) => (
@@ -142,15 +168,29 @@ function StatsBar() {
             </span>
           </div>
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setupJob.mutate()}
-          disabled={setupJob.isPending}
-        >
-          {setupJob.isPending ? <RefreshCw className="w-3 h-3 animate-spin mr-1" /> : <Zap className="w-3 h-3 mr-1" />}
-          {jobStatus ? "Verify Job" : "Setup Daily Job"}
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="default"
+            onClick={() => generateNow.mutate()}
+            disabled={generateNow.isPending}
+            className="gap-1.5"
+          >
+            {generateNow.isPending
+              ? <RefreshCw className="w-3 h-3 animate-spin" />
+              : <Play className="w-3 h-3" />}
+            {generateNow.isPending ? "Generating…" : "Generate Now"}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setupJob.mutate()}
+            disabled={setupJob.isPending}
+          >
+            {setupJob.isPending ? <RefreshCw className="w-3 h-3 animate-spin mr-1" /> : <Zap className="w-3 h-3 mr-1" />}
+            {jobStatus ? "Verify Job" : "Setup Daily Job"}
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -529,32 +569,30 @@ function GeneratedPostsTab() {
 
 export default function ContentPipeline() {
   return (
-    <DashboardLayout>
-      <div className="p-6 space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold">Content Pipeline</h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            Automated daily blog post generation from competitor keyword data
-          </p>
-        </div>
-
-        <StatsBar />
-
-        <Tabs defaultValue="topics">
-          <TabsList>
-            <TabsTrigger value="topics">Topic Queue</TabsTrigger>
-            <TabsTrigger value="posts">Generated Posts</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="topics" className="mt-4">
-            <TopicQueueTab />
-          </TabsContent>
-
-          <TabsContent value="posts" className="mt-4">
-            <GeneratedPostsTab />
-          </TabsContent>
-        </Tabs>
+    <div className="p-6 space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold">Content Pipeline</h1>
+        <p className="text-muted-foreground text-sm mt-1">
+          Automated daily blog post generation from competitor keyword data
+        </p>
       </div>
-    </DashboardLayout>
+
+      <StatsBar />
+
+      <Tabs defaultValue="topics">
+        <TabsList>
+          <TabsTrigger value="topics">Topic Queue</TabsTrigger>
+          <TabsTrigger value="posts">Generated Posts</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="topics" className="mt-4">
+          <TopicQueueTab />
+        </TabsContent>
+
+        <TabsContent value="posts" className="mt-4">
+          <GeneratedPostsTab />
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 }

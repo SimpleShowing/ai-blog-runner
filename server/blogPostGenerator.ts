@@ -163,17 +163,16 @@ async function suggestWpCategories(title: string, contentType: string): Promise<
   }
 }
 
-// ─── Main scheduled handler ───────────────────────────────────────────────────
+// ─── Core generation logic (shared by cron and manual trigger) ───────────────
 
-export async function blogPostGeneratorHandler(req: Request, res: Response) {
+export type GenerateResult =
+  | { ok: true; postId: number; wpPostId: number; wpPostUrl: string; title: string }
+  | { ok: false; skipped: string }
+  | { ok: false; error: string; message: string };
+
+export async function runBlogPostGeneration(): Promise<GenerateResult> {
   try {
-    // 1. Authenticate cron request
-    const user = await sdk.authenticateRequest(req);
-    if (!user.isCron) {
-      return res.status(403).json({ error: "cron-only endpoint" });
-    }
-
-    // 2. Get WP credentials
+    // 1. Get WP credentials
     const [wpUrl, wpUsername, wpAppPassword] = await Promise.all([
       getSetting("wp_url"),
       getSetting("wp_username"),
@@ -182,13 +181,13 @@ export async function blogPostGeneratorHandler(req: Request, res: Response) {
 
     if (!wpUrl || !wpUsername || !wpAppPassword) {
       console.warn("[BlogGen] WordPress credentials not configured — skipping");
-      return res.json({ ok: true, skipped: "wp-credentials-missing" });
+      return { ok: false, skipped: "wp-credentials-missing" };
     }
 
     const credentials = Buffer.from(`${wpUsername}:${wpAppPassword}`).toString("base64");
     const apiBase = wpUrl.replace(/\/$/, "") + "/wp-json/wp/v2";
 
-    // 3. Pick the next pending topic
+    // 2. Pick the next pending topic
     const topic = await getNextPendingBlogTopic();
     if (!topic) {
       console.log("[BlogGen] No pending topics — nothing to generate");
@@ -196,7 +195,7 @@ export async function blogPostGeneratorHandler(req: Request, res: Response) {
         title: "Blog Pipeline: Topic Queue Empty",
         content: "The automated blog post generator ran but found no pending topics. Please add more topics to the queue.",
       });
-      return res.json({ ok: true, skipped: "no-pending-topics" });
+      return { ok: false, skipped: "no-pending-topics" };
     }
 
     console.log(`[BlogGen] Generating post for topic #${topic.id}: "${topic.keyword}"`);
@@ -273,7 +272,7 @@ Write the full post now:`;
         errorMessage: err.message,
       });
       await updateBlogTopicStatus(topic.id, "skipped");
-      return res.status(500).json({ error: "llm-failed", message: err.message });
+      return { ok: false, error: "llm-failed", message: err.message };
     }
 
     // 6. Publish to WordPress
@@ -330,7 +329,7 @@ Write the full post now:`;
         errorMessage: err.message,
       });
       await updateBlogTopicStatus(topic.id, "skipped");
-      return res.status(500).json({ error: "wp-publish-failed", message: err.message });
+      return { ok: false, error: "wp-publish-failed", message: err.message };
     }
 
     // 7. Mark topic as used, update generated post record
@@ -357,15 +356,33 @@ Write the full post now:`;
     });
 
     console.log(`[BlogGen] Successfully published "${postTitle}" (WP #${wpPostId})`);
-    return res.json({ ok: true, postId, wpPostId, wpPostUrl, title: postTitle });
+    return { ok: true, postId, wpPostId: wpPostId!, wpPostUrl: wpPostUrl!, title: postTitle };
 
   } catch (err: any) {
     console.error("[BlogGen] Unexpected error:", err);
-    return res.status(500).json({
-      error: err.message,
-      stack: err.stack,
-      context: { url: req.url },
-      timestamp: new Date().toISOString(),
-    });
+    return { ok: false, error: err.message, message: err.stack ?? "" };
+  }
+}
+
+// ─── Express handler for the scheduled cron endpoint ─────────────────────────────────
+
+export async function blogPostGeneratorHandler(req: Request, res: Response) {
+  try {
+    // Authenticate: only cron callers are allowed
+    const user = await sdk.authenticateRequest(req);
+    if (!user.isCron) {
+      return res.status(403).json({ error: "cron-only endpoint" });
+    }
+    const result = await runBlogPostGeneration();
+    if (!result.ok && "skipped" in result) {
+      return res.json({ ok: true, skipped: result.skipped });
+    }
+    if (!result.ok) {
+      return res.status(500).json(result);
+    }
+    return res.json(result);
+  } catch (err: any) {
+    console.error("[BlogGen] Unexpected handler error:", err);
+    return res.status(500).json({ error: err.message, timestamp: new Date().toISOString() });
   }
 }
