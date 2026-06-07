@@ -127,3 +127,11 @@
 - [x] Add reorderTopics tRPC mutation (bulk priority reorder from drag result)
 - [x] Add drag-to-reorder UI with GripVertical handle on Content Pipeline topic queue
 - [x] Promote Bulk Import to a prominent Upload CTA on the Content Pipeline page header
+
+## Phase 16: CSV Importer & Queue Column Expansion
+
+- [x] Add referring_domains, num_keywords, position, previous_top_keyword columns to blog_topics schema
+- [x] Generate and apply migration SQL for new columns
+- [x] Update seedTopics tRPC input to accept all new optional fields
+- [x] Update CSV parser to map all Clever column headers (referring domains, # of keywords, position, previous top keyword, content type)
+- [x] Add new columns to Content Pipeline topic queue table (position, referring domains, # keywords, prev keyword)

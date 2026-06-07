@@ -297,6 +297,11 @@ export const blogTopics = mysqlTable("blog_topics", {
   source: mysqlEnum("source", ["clever", "houzeo", "manual"]).default("manual").notNull(),
   status: mysqlEnum("status", ["pending", "used", "skipped"]).default("pending").notNull(),
   priority: int("priority").default(0).notNull(),
+  // Extra columns from Clever/Houzeo CSV exports
+  referringDomains: int("referringDomains"),
+  numKeywords: int("numKeywords"),
+  position: int("position"),
+  previousTopKeyword: varchar("previousTopKeyword", { length: 512 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

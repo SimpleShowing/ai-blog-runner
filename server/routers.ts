@@ -1264,16 +1264,21 @@ const blogPipelineRouter = router({
   seedTopics: adminProcedure
     .input(z.object({
       topics: z.array(z.object({
-        keyword: z.string(),
+        keyword: z.string().min(1),
         sourceUrl: z.string().optional(),
         traffic: z.number().default(0),
         kwVolume: z.number().default(0),
-        contentType: z.enum(["informational", "lead_gen", "affiliate", "comparison"]),
-        source: z.enum(["clever", "houzeo", "manual"]),
+        contentType: z.enum(["informational", "lead_gen", "affiliate", "comparison"]).default("informational"),
+        source: z.enum(["clever", "houzeo", "manual"]).default("manual"),
+        // New optional fields from Clever/Houzeo exports
+        referringDomains: z.number().optional(),
+        numKeywords: z.number().optional(),
+        position: z.number().optional(),
+        previousTopKeyword: z.string().optional(),
       })),
     }))
     .mutation(async ({ input }) => {
-      const rows = input.topics.map((t, i) => ({
+      const rows = input.topics.map((t) => ({
         keyword: t.keyword,
         sourceUrl: t.sourceUrl ?? null,
         traffic: t.traffic,
@@ -1282,6 +1287,10 @@ const blogPipelineRouter = router({
         source: t.source,
         status: "pending" as const,
         priority: t.traffic, // use traffic as initial priority
+        referringDomains: t.referringDomains ?? null,
+        numKeywords: t.numKeywords ?? null,
+        position: t.position ?? null,
+        previousTopKeyword: t.previousTopKeyword ?? null,
       }));
       const inserted = await bulkInsertBlogTopics(rows);
       return { inserted };

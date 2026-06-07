@@ -119,6 +119,11 @@ type ParsedRow = {
   contentType: ContentType;
   source: "clever" | "houzeo" | "manual";
   sourceUrl?: string;
+  // New optional Clever/Houzeo columns
+  referringDomains?: number;
+  numKeywords?: number;
+  position?: number;
+  previousTopKeyword?: string;
 };
 
 type ParseError = { row: number; message: string };
@@ -126,10 +131,20 @@ type ParseError = { row: number; message: string };
 const CONTENT_TYPE_ALIASES: Record<string, ContentType> = {
   informational: "informational",
   info: "informational",
+  "article": "informational",
+  "article > research": "informational",
+  "article > how-to": "informational",
+  "article > definition": "informational",
+  "article > listicle": "informational",
+  "article > guide": "informational",
+  "article > review": "informational",
+  "article > comparison": "comparison",
+  "article > vs": "comparison",
   "lead gen": "lead_gen",
   lead_gen: "lead_gen",
   leadgen: "lead_gen",
   "lead-gen": "lead_gen",
+  "lead generation": "lead_gen",
   affiliate: "affiliate",
   aff: "affiliate",
   comparison: "comparison",
@@ -138,23 +153,29 @@ const CONTENT_TYPE_ALIASES: Record<string, ContentType> = {
 };
 
 function parseCSV(text: string): { rows: ParsedRow[]; errors: ParseError[] } {
-  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  // Strip BOM if present
+  const cleaned = text.replace(/^\uFEFF/, "");
+  const lines = cleaned.split(/\r?\n/).filter(l => l.trim());
   if (lines.length < 2) return { rows: [], errors: [{ row: 0, message: "File appears empty or has no data rows" }] };
 
-  // Detect delimiter (comma or tab)
+  // Detect delimiter (tab preferred for Clever exports, else comma)
   const delim = lines[0].includes("\t") ? "\t" : ",";
 
-  // Parse header
-  const headers = lines[0].split(delim).map(h => h.trim().toLowerCase().replace(/["']/g, ""));
+  // Parse header — normalize to lowercase, strip quotes
+  const headers = lines[0].split(delim).map(h => h.trim().toLowerCase().replace(/["'\uFEFF]/g, ""));
 
-  // Map header names to field indices
+  // Map header names to field indices — broad matching for Clever/Houzeo variants
   const idx = {
-    keyword: headers.findIndex(h => ["keyword", "kw", "query", "term", "topic"].includes(h)),
-    traffic: headers.findIndex(h => ["traffic", "visits", "volume", "monthly traffic", "est. traffic", "estimated traffic"].includes(h)),
-    kwVolume: headers.findIndex(h => ["kw volume", "kwvolume", "search volume", "sv", "volume"].includes(h)),
-    contentType: headers.findIndex(h => ["content type", "contenttype", "type", "intent"].includes(h)),
-    source: headers.findIndex(h => ["source", "competitor", "origin"].includes(h)),
-    sourceUrl: headers.findIndex(h => ["url", "source url", "sourceurl", "link"].includes(h)),
+    keyword:            headers.findIndex(h => ["keyword", "kw", "query", "term", "topic"].includes(h)),
+    traffic:            headers.findIndex(h => ["traffic", "current traffic", "visits", "monthly traffic", "est. traffic", "estimated traffic"].includes(h)),
+    kwVolume:           headers.findIndex(h => ["kw volume", "kwvolume", "search volume", "sv"].includes(h)),
+    contentType:        headers.findIndex(h => ["content type", "contenttype", "conent type", "type", "intent"].includes(h)),
+    source:             headers.findIndex(h => ["source", "competitor", "origin"].includes(h)),
+    sourceUrl:          headers.findIndex(h => ["url", "source url", "sourceurl", "link"].includes(h)),
+    referringDomains:   headers.findIndex(h => ["referring domains", "referringdomains", "ref domains", "rd"].includes(h)),
+    numKeywords:        headers.findIndex(h => ["# of keywords", "# keywords", "num keywords", "keywords", "current # of keywords"].includes(h)),
+    position:           headers.findIndex(h => ["position", "rank", "serp position", "pos"].includes(h)),
+    previousTopKeyword: headers.findIndex(h => ["previous top keyword", "prev keyword", "previous keyword", "prev top keyword"].includes(h)),
   };
 
   if (idx.keyword === -1) {
@@ -177,14 +198,31 @@ function parseCSV(text: string): { rows: ParsedRow[]; errors: ParseError[] } {
     const rawType = idx.contentType >= 0 ? cells[idx.contentType]?.toLowerCase().trim() : "";
     const contentType: ContentType = CONTENT_TYPE_ALIASES[rawType] ?? "informational";
 
+    // Source: prefer explicit source column; fall back to URL domain detection
     const rawSource = idx.source >= 0 ? cells[idx.source]?.toLowerCase().trim() : "";
+    const rawUrl = idx.sourceUrl >= 0 ? cells[idx.sourceUrl]?.trim() : "";
     const source: "clever" | "houzeo" | "manual" =
-      rawSource.includes("clever") ? "clever" :
-      rawSource.includes("houzeo") ? "houzeo" : "manual";
+      rawSource.includes("clever") || rawUrl?.includes("listwithclever") || rawUrl?.includes("clever") ? "clever" :
+      rawSource.includes("houzeo") || rawUrl?.includes("houzeo") ? "houzeo" : "manual";
 
-    const sourceUrl = idx.sourceUrl >= 0 ? cells[idx.sourceUrl]?.trim() || undefined : undefined;
+    const sourceUrl = rawUrl || undefined;
 
-    rows.push({ keyword, traffic, kwVolume, contentType, source, sourceUrl });
+    // Optional enrichment columns
+    const referringDomains = idx.referringDomains >= 0
+      ? (parseInt(cells[idx.referringDomains]?.replace(/[^0-9]/g, "") || "", 10) || undefined)
+      : undefined;
+    const numKeywords = idx.numKeywords >= 0
+      ? (parseInt(cells[idx.numKeywords]?.replace(/[^0-9]/g, "") || "", 10) || undefined)
+      : undefined;
+    const position = idx.position >= 0
+      ? (parseInt(cells[idx.position]?.replace(/[^0-9]/g, "") || "", 10) || undefined)
+      : undefined;
+    const previousTopKeyword = idx.previousTopKeyword >= 0
+      ? (cells[idx.previousTopKeyword]?.trim() || undefined)
+      : undefined;
+
+    rows.push({ keyword, traffic, kwVolume, contentType, source, sourceUrl,
+      referringDomains, numKeywords, position, previousTopKeyword });
   }
 
   return { rows, errors };
@@ -236,9 +274,13 @@ function BulkImportDialog({ onImported, prominent }: { onImported: () => void; p
       keyword: r.keyword,
       traffic: r.traffic,
       kwVolume: r.kwVolume,
-      contentType: r.contentType === "informational" && defaultType !== "informational" && !r.contentType ? defaultType : r.contentType,
+      contentType: r.contentType === "informational" && defaultType !== "informational" ? defaultType : r.contentType,
       source: r.source === "manual" && defaultSource !== "manual" ? defaultSource : r.source,
       sourceUrl: r.sourceUrl,
+      referringDomains: r.referringDomains,
+      numKeywords: r.numKeywords,
+      position: r.position,
+      previousTopKeyword: r.previousTopKeyword,
     }));
     seedTopics.mutate({ topics });
   };
@@ -264,11 +306,14 @@ function BulkImportDialog({ onImported, prominent }: { onImported: () => void; p
           <DialogHeader>
             <DialogTitle>Bulk Import Topics from CSV</DialogTitle>
             <DialogDescription>
-              Upload a CSV or TSV file. Required column: <code className="bg-muted px-1 rounded text-xs">keyword</code>.
-              Optional columns: <code className="bg-muted px-1 rounded text-xs">traffic</code>,{" "}
+              Upload a CSV or TSV file. Only <code className="bg-muted px-1 rounded text-xs">keyword</code> is required.
+              All other columns are optional: <code className="bg-muted px-1 rounded text-xs">current traffic</code>,{" "}
+              <code className="bg-muted px-1 rounded text-xs">referring domains</code>,{" "}
+              <code className="bg-muted px-1 rounded text-xs"># of keywords</code>,{" "}
+              <code className="bg-muted px-1 rounded text-xs">position</code>,{" "}
+              <code className="bg-muted px-1 rounded text-xs">previous top keyword</code>,{" "}
               <code className="bg-muted px-1 rounded text-xs">content type</code>,{" "}
-              <code className="bg-muted px-1 rounded text-xs">source</code>,{" "}
-              <code className="bg-muted px-1 rounded text-xs">url</code>.
+              <code className="bg-muted px-1 rounded text-xs">source</code>.
             </DialogDescription>
           </DialogHeader>
 
@@ -353,21 +398,34 @@ function BulkImportDialog({ onImported, prominent }: { onImported: () => void; p
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                   Preview (first {previewRows.length} of {parsed!.length} rows)
                 </p>
-                <div className="border rounded-lg overflow-hidden">
+<div className="border rounded-lg overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead className="text-xs">Keyword</TableHead>
-                        <TableHead className="text-xs w-24">Traffic</TableHead>
+                        <TableHead className="text-xs w-20">Traffic</TableHead>
+                        <TableHead className="text-xs w-16">Pos.</TableHead>
+                        <TableHead className="text-xs w-16">Ref. D</TableHead>
+                        <TableHead className="text-xs w-16"># KWs</TableHead>
                         <TableHead className="text-xs w-32">Content Type</TableHead>
-                        <TableHead className="text-xs w-24">Source</TableHead>
+                        <TableHead className="text-xs w-20">Source</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {previewRows.map((row, i) => (
                         <TableRow key={i}>
-                          <TableCell className="text-xs truncate max-w-[200px]">{row.keyword}</TableCell>
+                          <TableCell className="text-xs max-w-[180px]">
+                            <div className="truncate">{row.keyword}</div>
+                            {row.previousTopKeyword && (
+                              <div className="text-muted-foreground truncate" title={`Prev: ${row.previousTopKeyword}`}>
+                                ↳ {row.previousTopKeyword}
+                              </div>
+                            )}
+                          </TableCell>
                           <TableCell className="text-xs tabular-nums">{row.traffic > 0 ? formatTraffic(row.traffic) : "—"}</TableCell>
+                          <TableCell className="text-xs tabular-nums">{row.position ?? "—"}</TableCell>
+                          <TableCell className="text-xs tabular-nums">{row.referringDomains ?? "—"}</TableCell>
+                          <TableCell className="text-xs tabular-nums">{row.numKeywords ?? "—"}</TableCell>
                           <TableCell className="text-xs">
                             <ContentTypeBadge type={row.contentType} />
                           </TableCell>
@@ -526,6 +584,11 @@ type TopicRow = {
   status: string;
   priority: number;
   sourceUrl?: string | null;
+  // Enrichment columns from Clever/Houzeo
+  referringDomains?: number | null;
+  numKeywords?: number | null;
+  position?: number | null;
+  previousTopKeyword?: string | null;
 };
 
 function SortableTopicRow({
@@ -570,6 +633,11 @@ function SortableTopicRow({
       </TableCell>
       <TableCell className="font-medium max-w-xs">
         <div className="truncate">{topic.keyword}</div>
+        {topic.previousTopKeyword && (
+          <div className="text-xs text-muted-foreground truncate" title={`Prev: ${topic.previousTopKeyword}`}>
+            ↳ {topic.previousTopKeyword}
+          </div>
+        )}
         {topic.sourceUrl && (
           <a
             href={topic.sourceUrl}
@@ -587,6 +655,29 @@ function SortableTopicRow({
       </TableCell>
       <TableCell className="text-right tabular-nums">
         {formatTraffic(topic.traffic)}
+      </TableCell>
+      {/* Position: lower = better ranking */}
+      <TableCell className="text-right tabular-nums">
+        {topic.position != null ? (
+          <span className={`text-xs font-medium ${
+            topic.position <= 5 ? "text-green-600" :
+            topic.position <= 20 ? "text-yellow-600" : "text-muted-foreground"
+          }`}>
+            #{topic.position}
+          </span>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        )}
+      </TableCell>
+      <TableCell className="text-right tabular-nums">
+        <span className="text-xs text-muted-foreground">
+          {topic.referringDomains != null ? topic.referringDomains : "—"}
+        </span>
+      </TableCell>
+      <TableCell className="text-right tabular-nums">
+        <span className="text-xs text-muted-foreground">
+          {topic.numKeywords != null ? topic.numKeywords.toLocaleString() : "—"}
+        </span>
       </TableCell>
       <TableCell>
         <span className="text-xs text-muted-foreground capitalize">{topic.source}</span>
@@ -763,7 +854,10 @@ function TopicQueueTab() {
               <TableHead className="w-8 px-2" />
               <TableHead>Keyword</TableHead>
               <TableHead className="w-36">Content Type</TableHead>
-              <TableHead className="w-24 text-right">Traffic</TableHead>
+              <TableHead className="w-20 text-right">Traffic</TableHead>
+              <TableHead className="w-16 text-right" title="SERP position on competitor site">Pos.</TableHead>
+              <TableHead className="w-16 text-right" title="Referring domains to source page">Ref. D</TableHead>
+              <TableHead className="w-16 text-right" title="Number of keywords ranking for source page"># KWs</TableHead>
               <TableHead className="w-24">Source</TableHead>
               <TableHead className="w-24">Status</TableHead>
               <TableHead className="w-24 text-right">Actions</TableHead>
@@ -773,14 +867,14 @@ function TopicQueueTab() {
             {isLoading ? (
               Array.from({ length: 10 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 7 }).map((_, j) => (
+                  {Array.from({ length: 10 }).map((_, j) => (
                     <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                   ))}
                 </TableRow>
               ))
             ) : displayTopics.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
                   No topics found
                 </TableCell>
               </TableRow>
