@@ -506,11 +506,7 @@ Return JSON with these exact keys:
         await updateDraft(draftId, { ...parsed, status: "draft" });
         await updateTopic(input.topicId, { status: "draft_ready" });
 
-        // Notify owner
-        await notifyOwner({
-          title: "New Draft Ready for Review",
-          content: `A new draft for "${topic.title}" is ready for editorial review.`,
-        });
+        // Draft ready notification intentionally disabled
       } catch (err) {
         await updateDraft(draftId, { status: "draft" });
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Draft generation failed" });

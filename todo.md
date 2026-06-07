@@ -147,8 +147,8 @@
 
 ## Phase 19: Pipeline → Drafts Mirror & Bulk Generate
 
-- [ ] Update blogPostGenerator.ts: after successful WP publish, create a mirror record in the drafts table (status: published, wpPostId set, content = generated HTML)
-- [ ] Add createDraftFromPipeline DB helper in db.ts
-- [ ] Add bulkGenerateTopics tRPC mutation to blogPipelineRouter (accepts array of topicIds, runs generateForTopic sequentially)
-- [ ] Add "Generate All Selected" button to the bulk-action toolbar in ContentPipeline.tsx (shown when checkboxes are selected alongside Delete)
-- [ ] Show progress toast during bulk generate (e.g. "Generating 1 of 5...")
+- [x] Update blogPostGenerator.ts: after successful WP publish, create a mirror record in the drafts table (status: published, wpPostId set, content = generated HTML)
+- [x] Add createDraftFromPipeline DB helper in db.ts
+- [x] Add bulkGenerateTopics tRPC mutation to blogPipelineRouter (accepts array of topicIds, runs generateForTopic sequentially)
+- [x] Add "Generate All Selected" button to the bulk-action toolbar in ContentPipeline.tsx (shown when checkboxes are selected alongside Delete)
+- [x] Show progress toast during bulk generate (e.g. "Generating 1 of 5...")

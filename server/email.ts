@@ -121,6 +121,7 @@ export async function sendPartnerPublished(opts: {
         <p><strong>Payment due: ${amount}</strong></p>
         <p>As a reminder, payment for your article placement is due upon publication. Please use the secure link below to complete your payment at your earliest convenience.</p>
         <p><a href="${opts.paymentLinkUrl}" style="background:#2563eb;color:white;padding:10px 20px;text-decoration:none;border-radius:4px;display:inline-block">Pay Now — ${amount}</a></p>
+        <p style="font-size:12px;color:#6b7280"><strong>Please note:</strong> if payment is not received within 7 days of publication, your article or link will be automatically removed from the SimpleShowing blog.</p>
         <p style="font-size:12px;color:#6b7280">If you have any questions about payment, please reply to this email.</p>
       `
       : "";
