@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -24,6 +26,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Play,
+  Upload,
+  FileUp,
+  AlertCircle,
+  CheckCircle,
 } from "lucide-react";
 
 // ─── Type helpers ─────────────────────────────────────────────────────────────
@@ -84,6 +90,292 @@ function PostStatusBadge({ status }: { status: PostStatus }) {
 function formatTraffic(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(n);
+}
+
+// ─── CSV parsing helpers ─────────────────────────────────────────────────────
+
+type ParsedRow = {
+  keyword: string;
+  traffic: number;
+  kwVolume: number;
+  contentType: ContentType;
+  source: "clever" | "houzeo" | "manual";
+  sourceUrl?: string;
+};
+
+type ParseError = { row: number; message: string };
+
+const CONTENT_TYPE_ALIASES: Record<string, ContentType> = {
+  informational: "informational",
+  info: "informational",
+  "lead gen": "lead_gen",
+  lead_gen: "lead_gen",
+  leadgen: "lead_gen",
+  "lead-gen": "lead_gen",
+  affiliate: "affiliate",
+  aff: "affiliate",
+  comparison: "comparison",
+  compare: "comparison",
+  vs: "comparison",
+};
+
+function parseCSV(text: string): { rows: ParsedRow[]; errors: ParseError[] } {
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) return { rows: [], errors: [{ row: 0, message: "File appears empty or has no data rows" }] };
+
+  // Detect delimiter (comma or tab)
+  const delim = lines[0].includes("\t") ? "\t" : ",";
+
+  // Parse header
+  const headers = lines[0].split(delim).map(h => h.trim().toLowerCase().replace(/["']/g, ""));
+
+  // Map header names to field indices
+  const idx = {
+    keyword: headers.findIndex(h => ["keyword", "kw", "query", "term", "topic"].includes(h)),
+    traffic: headers.findIndex(h => ["traffic", "visits", "volume", "monthly traffic", "est. traffic", "estimated traffic"].includes(h)),
+    kwVolume: headers.findIndex(h => ["kw volume", "kwvolume", "search volume", "sv", "volume"].includes(h)),
+    contentType: headers.findIndex(h => ["content type", "contenttype", "type", "intent"].includes(h)),
+    source: headers.findIndex(h => ["source", "competitor", "origin"].includes(h)),
+    sourceUrl: headers.findIndex(h => ["url", "source url", "sourceurl", "link"].includes(h)),
+  };
+
+  if (idx.keyword === -1) {
+    return { rows: [], errors: [{ row: 0, message: `Could not find a keyword column. Headers found: ${headers.join(", ")}` }] };
+  }
+
+  const rows: ParsedRow[] = [];
+  const errors: ParseError[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const cells = lines[i].split(delim).map(c => c.trim().replace(/^"|"$/g, ""));
+    const keyword = cells[idx.keyword]?.trim();
+    if (!keyword) continue;
+
+    const trafficRaw = idx.traffic >= 0 ? cells[idx.traffic] : "";
+    const kvRaw = idx.kwVolume >= 0 ? cells[idx.kwVolume] : trafficRaw;
+    const traffic = parseInt(trafficRaw?.replace(/[^0-9]/g, "") || "0", 10) || 0;
+    const kwVolume = parseInt(kvRaw?.replace(/[^0-9]/g, "") || "0", 10) || 0;
+
+    const rawType = idx.contentType >= 0 ? cells[idx.contentType]?.toLowerCase().trim() : "";
+    const contentType: ContentType = CONTENT_TYPE_ALIASES[rawType] ?? "informational";
+
+    const rawSource = idx.source >= 0 ? cells[idx.source]?.toLowerCase().trim() : "";
+    const source: "clever" | "houzeo" | "manual" =
+      rawSource.includes("clever") ? "clever" :
+      rawSource.includes("houzeo") ? "houzeo" : "manual";
+
+    const sourceUrl = idx.sourceUrl >= 0 ? cells[idx.sourceUrl]?.trim() || undefined : undefined;
+
+    rows.push({ keyword, traffic, kwVolume, contentType, source, sourceUrl });
+  }
+
+  return { rows, errors };
+}
+
+// ─── Bulk Import Dialog ───────────────────────────────────────────────────────
+
+function BulkImportDialog({ onImported }: { onImported: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [parsed, setParsed] = useState<ParsedRow[] | null>(null);
+  const [parseErrors, setParseErrors] = useState<ParseError[]>([]);
+  const [fileName, setFileName] = useState("");
+  const [defaultSource, setDefaultSource] = useState<"clever" | "houzeo" | "manual">("manual");
+  const [defaultType, setDefaultType] = useState<ContentType>("informational");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const seedTopics = trpc.blogPipeline.seedTopics.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Imported ${data.inserted} topics into the queue`);
+      onImported();
+      setOpen(false);
+      setParsed(null);
+      setFileName("");
+    },
+    onError: (err) => toast.error(`Import failed: ${err.message}`),
+  });
+
+  const handleFile = useCallback((file: File) => {
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const { rows, errors } = parseCSV(text);
+      setParsed(rows);
+      setParseErrors(errors);
+    };
+    reader.readAsText(file);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  }, [handleFile]);
+
+  const handleImport = () => {
+    if (!parsed || parsed.length === 0) return;
+    const topics = parsed.map(r => ({
+      keyword: r.keyword,
+      traffic: r.traffic,
+      kwVolume: r.kwVolume,
+      contentType: r.contentType === "informational" && defaultType !== "informational" && !r.contentType ? defaultType : r.contentType,
+      source: r.source === "manual" && defaultSource !== "manual" ? defaultSource : r.source,
+      sourceUrl: r.sourceUrl,
+    }));
+    seedTopics.mutate({ topics });
+  };
+
+  const previewRows = parsed?.slice(0, 5) ?? [];
+
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)} className="gap-1.5">
+        <Upload className="w-3.5 h-3.5" />
+        Bulk Import
+      </Button>
+
+      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { setParsed(null); setFileName(""); } }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Bulk Import Topics from CSV</DialogTitle>
+            <DialogDescription>
+              Upload a CSV or TSV file. Required column: <code className="bg-muted px-1 rounded text-xs">keyword</code>.
+              Optional columns: <code className="bg-muted px-1 rounded text-xs">traffic</code>,{" "}
+              <code className="bg-muted px-1 rounded text-xs">content type</code>,{" "}
+              <code className="bg-muted px-1 rounded text-xs">source</code>,{" "}
+              <code className="bg-muted px-1 rounded text-xs">url</code>.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Drop zone */}
+            <div
+              className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-primary/60 transition-colors"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={handleDrop}
+              onClick={() => fileRef.current?.click()}
+            >
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".csv,.tsv,.txt"
+                className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+              />
+              {fileName ? (
+                <div className="flex flex-col items-center gap-2">
+                  <FileUp className="w-8 h-8 text-primary" />
+                  <p className="text-sm font-medium">{fileName}</p>
+                  {parsed !== null && (
+                    <p className="text-xs text-muted-foreground">{parsed.length} rows parsed</p>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                  <Upload className="w-8 h-8" />
+                  <p className="text-sm">Drop a CSV file here, or click to browse</p>
+                  <p className="text-xs">Supports .csv, .tsv, .txt</p>
+                </div>
+              )}
+            </div>
+
+            {/* Parse errors */}
+            {parseErrors.length > 0 && (
+              <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-sm">
+                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                <div>
+                  {parseErrors.map((e, i) => <p key={i}>{e.message}</p>)}
+                </div>
+              </div>
+            )}
+
+            {/* Defaults for missing columns */}
+            {parsed && parsed.length > 0 && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Default source (for rows without a source column)</Label>
+                  <Select value={defaultSource} onValueChange={(v) => setDefaultSource(v as any)}>
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="manual">Manual</SelectItem>
+                      <SelectItem value="clever">Clever</SelectItem>
+                      <SelectItem value="houzeo">Houzeo</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Default content type (for rows without a type column)</Label>
+                  <Select value={defaultType} onValueChange={(v) => setDefaultType(v as any)}>
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="informational">Informational</SelectItem>
+                      <SelectItem value="lead_gen">Lead Gen</SelectItem>
+                      <SelectItem value="affiliate">Affiliate</SelectItem>
+                      <SelectItem value="comparison">Comparison</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            {/* Preview table */}
+            {previewRows.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  Preview (first {previewRows.length} of {parsed!.length} rows)
+                </p>
+                <div className="border rounded-lg overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="text-xs">Keyword</TableHead>
+                        <TableHead className="text-xs w-24">Traffic</TableHead>
+                        <TableHead className="text-xs w-32">Content Type</TableHead>
+                        <TableHead className="text-xs w-24">Source</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {previewRows.map((row, i) => (
+                        <TableRow key={i}>
+                          <TableCell className="text-xs truncate max-w-[200px]">{row.keyword}</TableCell>
+                          <TableCell className="text-xs tabular-nums">{row.traffic > 0 ? formatTraffic(row.traffic) : "—"}</TableCell>
+                          <TableCell className="text-xs">
+                            <ContentTypeBadge type={row.contentType} />
+                          </TableCell>
+                          <TableCell className="text-xs capitalize">{row.source}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                {parsed!.length > 5 && (
+                  <p className="text-xs text-muted-foreground text-center">…and {parsed!.length - 5} more rows</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button
+              onClick={handleImport}
+              disabled={!parsed || parsed.length === 0 || seedTopics.isPending}
+              className="gap-1.5"
+            >
+              {seedTopics.isPending
+                ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                : <CheckCircle className="w-3.5 h-3.5" />}
+              {seedTopics.isPending ? "Importing…" : `Import ${parsed?.length ?? 0} Topics`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }
 
 // ─── Stats Bar ────────────────────────────────────────────────────────────────
@@ -225,8 +517,8 @@ function TopicQueueTab() {
 
   return (
     <div className="space-y-4">
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3">
+      {/* Filters + Bulk Import */}
+      <div className="flex flex-wrap items-center gap-3">
         <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v as any); setPage(0); }}>
           <SelectTrigger className="w-36">
             <SelectValue placeholder="Status" />
@@ -257,6 +549,16 @@ function TopicQueueTab() {
             {data.total.toLocaleString()} topics
           </span>
         )}
+
+        {/* Push Bulk Import to the right */}
+        <div className="ml-auto">
+          <BulkImportDialog
+            onImported={() => {
+              utils.blogPipeline.listTopics.invalidate();
+              utils.blogPipeline.stats.invalidate();
+            }}
+          />
+        </div>
       </div>
 
       {/* Table */}
