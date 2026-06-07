@@ -1,4 +1,4 @@
-import { eq, desc, and, isNotNull, ne } from "drizzle-orm";
+import { eq, desc, and, isNotNull, ne, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertUser,
@@ -578,4 +578,11 @@ export async function countGeneratedPosts(opts?: {
     .from(generatedPosts)
     .where(conditions.length > 0 ? and(...conditions) : undefined);
   return Number(result[0]?.count ?? 0);
+}
+
+export async function bulkDeleteBlogTopics(ids: number[]) {
+  if (ids.length === 0) return;
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.delete(blogTopics).where(inArray(blogTopics.id, ids));
 }

@@ -22,8 +22,11 @@ import {
   createGeneratedPost,
   updateGeneratedPost,
   getSetting,
+  getDb,
 } from "./db";
+import { blogTopics } from "../drizzle/schema";
 import type { BlogTopic } from "../drizzle/schema";
+import { eq } from "drizzle-orm";
 
 // ─── CTA strategy by content type ────────────────────────────────────────────
 
@@ -167,10 +170,10 @@ async function suggestWpCategories(title: string, contentType: string): Promise<
 
 export type GenerateResult =
   | { ok: true; postId: number; wpPostId: number; wpPostUrl: string; title: string }
-  | { ok: false; skipped: string }
+  | { ok: false; skipped: string; reason?: string }
   | { ok: false; error: string; message: string };
 
-export async function runBlogPostGeneration(): Promise<GenerateResult> {
+export async function runBlogPostGeneration(specificTopicId?: number): Promise<GenerateResult> {
   try {
     // 1. Get WP credentials
     const [wpUrl, wpUsername, wpAppPassword] = await Promise.all([
@@ -187,8 +190,17 @@ export async function runBlogPostGeneration(): Promise<GenerateResult> {
     const credentials = Buffer.from(`${wpUsername}:${wpAppPassword}`).toString("base64");
     const apiBase = wpUrl.replace(/\/$/, "") + "/wp-json/wp/v2";
 
-    // 2. Pick the next pending topic
-    const topic = await getNextPendingBlogTopic();
+    // 2. Pick the topic — either a specific one or the next highest-priority pending topic
+    let topic: Awaited<ReturnType<typeof getNextPendingBlogTopic>>;
+    if (specificTopicId !== undefined) {
+      const db = await getDb();
+      if (!db) return { ok: false, skipped: "no-pending-topics", reason: "DB unavailable" };
+      const rows = await db.select().from(blogTopics).where(eq(blogTopics.id, specificTopicId)).limit(1);
+      topic = rows[0] ?? null;
+      if (!topic) return { ok: false, skipped: "no-pending-topics", reason: `Topic #${specificTopicId} not found` };
+    } else {
+      topic = await getNextPendingBlogTopic();
+    }
     if (!topic) {
       console.log("[BlogGen] No pending topics — nothing to generate");
       await notifyOwner({

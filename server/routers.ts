@@ -18,7 +18,7 @@ import {
   getAllUsers,
   createPartnerSubmission, getPartnerSubmissions, getPartnerSubmissionById, updatePartnerSubmission,
   getPublishedSubmissionsWithPayment, getUnpaidSubmissions,
-  getBlogTopics, countBlogTopics, getNextPendingBlogTopic, updateBlogTopicStatus, bulkInsertBlogTopics,
+  getBlogTopics, countBlogTopics, getNextPendingBlogTopic, updateBlogTopicStatus, bulkInsertBlogTopics, bulkDeleteBlogTopics,
   getGeneratedPosts, countGeneratedPosts,
 } from "./db";
 import { ENV } from "./_core/env";
@@ -1243,6 +1243,29 @@ const blogPipelineRouter = router({
         )
       );
       return { success: true };
+    }),
+
+  /** Delete one or many blog topics by ID */
+  deleteTopics: adminProcedure
+    .input(z.object({ ids: z.array(z.number()).min(1) }))
+    .mutation(async ({ input }) => {
+      await bulkDeleteBlogTopics(input.ids);
+      return { deleted: input.ids.length };
+    }),
+
+  /** Generate a draft for a specific topic immediately */
+  generateForTopic: adminProcedure
+    .input(z.object({ topicId: z.number() }))
+    .mutation(async ({ input }) => {
+      const { runBlogPostGeneration } = await import("./blogPostGenerator");
+      const result = await runBlogPostGeneration(input.topicId);
+      if (!result.ok && "skipped" in result) {
+        throw new TRPCError({ code: "NOT_FOUND", message: result.reason ?? "Topic not found or already used" });
+      }
+      if (!result.ok) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: (result as any).error ?? "Generation failed" });
+      }
+      return result;
     }),
 
   /** List generated posts with optional filters */

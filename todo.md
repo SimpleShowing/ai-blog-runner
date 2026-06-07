@@ -135,3 +135,12 @@
 - [x] Update seedTopics tRPC input to accept all new optional fields
 - [x] Update CSV parser to map all Clever column headers (referring domains, # of keywords, position, previous top keyword, content type)
 - [x] Add new columns to Content Pipeline topic queue table (position, referring domains, # keywords, prev keyword)
+
+## Phase 18: Content Pipeline CSV Fix & Queue UX
+
+- [ ] Add sourceUrl column to blog_topics schema and migrate
+- [ ] Fix CSV parser: handle UTF-16 BOM/encoding, map 'Source' → sourceUrl, 'Current traffic' → traffic, 'Conent Type' typo → contentType
+- [ ] Update seedTopics tRPC input to accept sourceUrl
+- [ ] Render source column as a clickable hyperlink (label = hostname, href = sourceUrl)
+- [ ] Add delete checkboxes with bulk delete action to topic queue
+- [ ] Remove redundant "Bulk Import" button from filters row (keep only "Upload Topics" in header)

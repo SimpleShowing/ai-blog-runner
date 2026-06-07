@@ -51,6 +51,10 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  Trash2,
+  Wand2,
+  Square,
+  SquareCheck,
 } from "lucide-react";
 
 // ─── Type helpers ─────────────────────────────────────────────────────────────
@@ -170,7 +174,7 @@ function parseCSV(text: string): { rows: ParsedRow[]; errors: ParseError[] } {
   // Map header names to field indices — broad matching for Clever/Houzeo variants
   const idx = {
     keyword:            headers.findIndex(h => ["keyword", "kw", "query", "term", "topic"].includes(h)),
-    traffic:            headers.findIndex(h => ["traffic", "current traffic", "visits", "monthly traffic", "est. traffic", "estimated traffic"].includes(h)),
+    traffic:            headers.findIndex(h => ["traffic", "current traffic", "currenttraffic", "visits", "monthly traffic", "est. traffic", "estimated traffic", "organic traffic"].includes(h)),
     kwVolume:           headers.findIndex(h => ["kw volume", "kwvolume", "search volume", "sv"].includes(h)),
     contentType:        headers.findIndex(h => ["content type", "contenttype", "conent type", "type", "intent"].includes(h)),
     source:             headers.findIndex(h => ["source", "competitor", "origin"].includes(h)),
@@ -201,14 +205,17 @@ function parseCSV(text: string): { rows: ParsedRow[]; errors: ParseError[] } {
     const rawType = idx.contentType >= 0 ? cells[idx.contentType]?.toLowerCase().trim() : "";
     const contentType: ContentType = CONTENT_TYPE_ALIASES[rawType] ?? "informational";
 
-    // Source: prefer explicit source column; fall back to URL domain detection
-    const rawSource = idx.source >= 0 ? cells[idx.source]?.toLowerCase().trim() : "";
-    const rawUrl = idx.sourceUrl >= 0 ? cells[idx.sourceUrl]?.trim() : "";
+    // Source: in Clever exports, the 'Source' column IS the article URL
+    // Detect if the source cell is a URL (starts with http) and treat it as sourceUrl
+    const rawSourceCell = idx.source >= 0 ? cells[idx.source]?.trim() : "";
+    const rawUrlCell = idx.sourceUrl >= 0 ? cells[idx.sourceUrl]?.trim() : "";
+    // If the source cell looks like a URL, use it as the sourceUrl
+    const isSourceUrl = rawSourceCell.startsWith("http");
+    const sourceUrl = (isSourceUrl ? rawSourceCell : rawUrlCell) || undefined;
+    const rawSource = isSourceUrl ? sourceUrl ?? "" : rawSourceCell.toLowerCase();
     const source: "clever" | "houzeo" | "manual" =
-      rawSource.includes("clever") || rawUrl?.includes("listwithclever") || rawUrl?.includes("clever") ? "clever" :
-      rawSource.includes("houzeo") || rawUrl?.includes("houzeo") ? "houzeo" : "manual";
-
-    const sourceUrl = rawUrl || undefined;
+      rawSource.includes("listwithclever") || rawSource.includes("clever") ? "clever" :
+      rawSource.includes("houzeo") ? "houzeo" : "manual";
 
     // Optional enrichment columns
     const referringDomains = idx.referringDomains >= 0
@@ -255,14 +262,23 @@ function BulkImportDialog({ onImported, prominent }: { onImported: () => void; p
 
   const handleFile = useCallback((file: File) => {
     setFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      const { rows, errors } = parseCSV(text);
-      setParsed(rows);
-      setParseErrors(errors);
+    // Sniff the first 4 bytes to detect UTF-16 LE BOM (FF FE) vs UTF-8
+    const sniffer = new FileReader();
+    sniffer.onload = (e) => {
+      const buf = e.target?.result as ArrayBuffer;
+      const bytes = new Uint8Array(buf.slice(0, 4));
+      const isUtf16LE = bytes[0] === 0xFF && bytes[1] === 0xFE;
+      const encoding = isUtf16LE ? "utf-16le" : "utf-8";
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const text = ev.target?.result as string;
+        const { rows, errors } = parseCSV(text);
+        setParsed(rows);
+        setParseErrors(errors);
+      };
+      reader.readAsText(file, encoding);
     };
-    reader.readAsText(file);
+    sniffer.readAsArrayBuffer(file.slice(0, 4));
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -596,16 +612,22 @@ type TopicRow = {
 
 function SortableTopicRow({
   topic,
-  onSkip,
   onRestore,
+  onGenerateDraft,
   isUpdating,
+  isGenerating,
   isDragDisabled,
+  isSelected,
+  onToggleSelect,
 }: {
   topic: TopicRow;
-  onSkip: (id: number) => void;
   onRestore: (id: number) => void;
+  onGenerateDraft: (id: number) => void;
   isUpdating: boolean;
+  isGenerating: boolean;
   isDragDisabled: boolean;
+  isSelected: boolean;
+  onToggleSelect: (id: number) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: topic.id, disabled: isDragDisabled });
@@ -617,8 +639,34 @@ function SortableTopicRow({
     zIndex: isDragging ? 10 : undefined,
   };
 
+  // Extract hostname from sourceUrl for display
+  const sourceLabel = (() => {
+    if (!topic.sourceUrl) return topic.source || null;
+    try {
+      return new URL(topic.sourceUrl).hostname.replace(/^www\./, "");
+    } catch {
+      return topic.source || null;
+    }
+  })();
+
   return (
-    <TableRow ref={setNodeRef} style={style} className={isDragging ? "bg-muted" : ""}>
+    <TableRow
+      ref={setNodeRef}
+      style={style}
+      className={`${isDragging ? "bg-muted" : ""} ${isSelected ? "bg-primary/5" : ""}`}
+    >
+      {/* Checkbox */}
+      <TableCell className="w-8 px-2">
+        <button
+          onClick={() => onToggleSelect(topic.id)}
+          className="text-muted-foreground hover:text-foreground p-1 rounded"
+          title={isSelected ? "Deselect" : "Select"}
+        >
+          {isSelected
+            ? <SquareCheck className="w-4 h-4 text-primary" />
+            : <Square className="w-4 h-4" />}
+        </button>
+      </TableCell>
       {/* Drag handle — only shown for pending topics on page 0 */}
       <TableCell className="w-8 px-2">
         {!isDragDisabled ? (
@@ -640,17 +688,6 @@ function SortableTopicRow({
           <div className="text-xs text-muted-foreground truncate" title={`Prev: ${topic.previousTopKeyword}`}>
             ↳ {topic.previousTopKeyword}
           </div>
-        )}
-        {topic.sourceUrl && (
-          <a
-            href={topic.sourceUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1 mt-0.5"
-          >
-            <ExternalLink className="w-3 h-3" />
-            Source
-          </a>
         )}
       </TableCell>
       <TableCell>
@@ -682,8 +719,22 @@ function SortableTopicRow({
           {topic.numKeywords != null ? topic.numKeywords.toLocaleString() : "—"}
         </span>
       </TableCell>
+      {/* Source — hyperlink when sourceUrl is available */}
       <TableCell>
-        <span className="text-xs text-muted-foreground capitalize">{topic.source}</span>
+        {topic.sourceUrl ? (
+          <a
+            href={topic.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-primary hover:underline flex items-center gap-1"
+            title={topic.sourceUrl}
+          >
+            <ExternalLink className="w-3 h-3 flex-shrink-0" />
+            <span className="truncate max-w-[80px]">{sourceLabel}</span>
+          </a>
+        ) : (
+          <span className="text-xs text-muted-foreground capitalize">{topic.source || "—"}</span>
+        )}
       </TableCell>
       <TableCell>
         <span className={`text-xs font-medium capitalize ${
@@ -699,12 +750,15 @@ function SortableTopicRow({
             <Button
               size="sm"
               variant="ghost"
-              className="h-7 px-2 text-xs"
-              onClick={() => onSkip(topic.id)}
-              disabled={isUpdating}
-              title="Skip this topic"
+              className="h-7 px-2 text-xs gap-1 text-violet-600 hover:text-violet-700 hover:bg-violet-50"
+              onClick={() => onGenerateDraft(topic.id)}
+              disabled={isUpdating || isGenerating}
+              title="Generate a draft post for this topic now"
             >
-              <SkipForward className="w-3 h-3" />
+              {isGenerating
+                ? <RefreshCw className="w-3 h-3 animate-spin" />
+                : <Wand2 className="w-3 h-3" />}
+              <span className="hidden sm:inline">Draft</span>
             </Button>
           )}
           {topic.status === "skipped" && (
@@ -769,6 +823,10 @@ function TopicQueueTab() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   // Local optimistic order for drag — only active when showing pending page 0 with no active sort
   const [localOrder, setLocalOrder] = useState<TopicRow[] | null>(null);
+  // Selection state for bulk delete
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  // Track which topic is currently being generated
+  const [generatingId, setGeneratingId] = useState<number | null>(null);
 
   // Toggle sort: same col flips direction; new col defaults to desc (except keyword → asc)
   function handleSort(col: SortCol) {
@@ -817,6 +875,52 @@ function TopicQueueTab() {
       setLocalOrder(null); // revert optimistic
     },
   });
+
+  const deleteTopics = trpc.blogPipeline.deleteTopics.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Deleted ${data.deleted} topic${data.deleted !== 1 ? "s" : ""}`);
+      setSelectedIds(new Set());
+      setLocalOrder(null);
+      utils.blogPipeline.listTopics.invalidate();
+      utils.blogPipeline.stats.invalidate();
+    },
+    onError: (err) => toast.error(`Delete failed: ${err.message}`),
+  });
+
+  const generateForTopic = trpc.blogPipeline.generateForTopic.useMutation({
+    onSuccess: (data) => {
+      setGeneratingId(null);
+      toast.success(`Draft published: "${data.title}"`, { duration: 6000 });
+      utils.blogPipeline.listTopics.invalidate();
+      utils.blogPipeline.stats.invalidate();
+      utils.blogPipeline.listPosts.invalidate();
+    },
+    onError: (err) => {
+      setGeneratingId(null);
+      toast.error(`Generation failed: ${err.message}`);
+    },
+  });
+
+  function handleToggleSelect(id: number) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function handleSelectAll() {
+    if (selectedIds.size === displayTopics.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(displayTopics.map(t => t.id)));
+    }
+  }
+
+  function handleGenerateDraft(id: number) {
+    setGeneratingId(id);
+    generateForTopic.mutate({ topicId: id });
+  }
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -895,17 +999,32 @@ function TopicQueueTab() {
           </span>
         )}
 
-        {/* Push Bulk Import to the right */}
-        <div className="ml-auto">
-          <BulkImportDialog
-            onImported={() => {
-              setLocalOrder(null);
-              utils.blogPipeline.listTopics.invalidate();
-              utils.blogPipeline.stats.invalidate();
-            }}
-          />
-        </div>
       </div>
+
+      {/* Bulk delete toolbar — shown when rows are selected */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 px-3 py-2 bg-destructive/10 border border-destructive/20 rounded-lg">
+          <span className="text-sm font-medium">{selectedIds.size} selected</span>
+          <Button
+            size="sm"
+            variant="destructive"
+            className="h-7 gap-1"
+            onClick={() => deleteTopics.mutate({ ids: Array.from(selectedIds) })}
+            disabled={deleteTopics.isPending}
+          >
+            {deleteTopics.isPending
+              ? <RefreshCw className="w-3 h-3 animate-spin" />
+              : <Trash2 className="w-3 h-3" />}
+            Delete selected
+          </Button>
+          <button
+            className="text-xs text-muted-foreground hover:text-foreground underline ml-auto"
+            onClick={() => setSelectedIds(new Set())}
+          >
+            Clear selection
+          </button>
+        </div>
+      )}
 
       {/* Active sort indicator */}
       {sortBy && (
@@ -920,6 +1039,19 @@ function TopicQueueTab() {
         <Table>
           <TableHeader>
             <TableRow>
+              {/* Checkbox select-all */}
+              <TableHead className="w-8 px-2">
+                <button
+                  onClick={handleSelectAll}
+                  className="text-muted-foreground hover:text-foreground p-1 rounded"
+                  title={selectedIds.size === displayTopics.length && displayTopics.length > 0 ? "Deselect all" : "Select all"}
+                >
+                  {selectedIds.size > 0 && selectedIds.size === displayTopics.length
+                    ? <SquareCheck className="w-4 h-4 text-primary" />
+                    : <Square className="w-4 h-4" />}
+                </button>
+              </TableHead>
+              {/* Drag handle column */}
               <TableHead className="w-8 px-2" />
               <SortableHead col="keyword" label="Keyword" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className="" />
               <TableHead className="w-36">Content Type</TableHead>
@@ -958,10 +1090,13 @@ function TopicQueueTab() {
                     <SortableTopicRow
                       key={topic.id}
                       topic={topic}
-                      onSkip={(id) => updateStatus.mutate({ id, status: "skipped" })}
                       onRestore={(id) => updateStatus.mutate({ id, status: "pending" })}
+                      onGenerateDraft={handleGenerateDraft}
                       isUpdating={updateStatus.isPending}
+                      isGenerating={generatingId === topic.id}
                       isDragDisabled={false}
+                      isSelected={selectedIds.has(topic.id)}
+                      onToggleSelect={handleToggleSelect}
                     />
                   ))}
                 </SortableContext>
@@ -971,10 +1106,13 @@ function TopicQueueTab() {
                 <SortableTopicRow
                   key={topic.id}
                   topic={topic}
-                  onSkip={(id) => updateStatus.mutate({ id, status: "skipped" })}
                   onRestore={(id) => updateStatus.mutate({ id, status: "pending" })}
+                  onGenerateDraft={handleGenerateDraft}
                   isUpdating={updateStatus.isPending}
+                  isGenerating={generatingId === topic.id}
                   isDragDisabled={true}
+                  isSelected={selectedIds.has(topic.id)}
+                  onToggleSelect={handleToggleSelect}
                 />
               ))
             )}
