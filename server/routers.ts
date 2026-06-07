@@ -1205,6 +1205,8 @@ const blogPipelineRouter = router({
       contentType: z.enum(["informational", "lead_gen", "affiliate", "comparison"]).optional(),
       limit: z.number().min(1).max(200).default(50),
       offset: z.number().min(0).default(0),
+      sortBy: z.enum(["priority", "traffic", "position", "referringDomains", "numKeywords", "keyword"]).optional(),
+      sortDir: z.enum(["asc", "desc"]).optional(),
     }))
     .query(async ({ input }) => {
       const [topics, total] = await Promise.all([

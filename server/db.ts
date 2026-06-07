@@ -451,6 +451,8 @@ export async function getBlogTopics(opts?: {
   contentType?: BlogTopic["contentType"];
   limit?: number;
   offset?: number;
+  sortBy?: "priority" | "traffic" | "position" | "referringDomains" | "numKeywords" | "keyword";
+  sortDir?: "asc" | "desc";
 }) {
   const db = await getDb();
   if (!db) return [];
@@ -459,7 +461,16 @@ export async function getBlogTopics(opts?: {
   if (opts?.status) conditions.push(eq(blogTopics.status, opts.status));
   if (opts?.contentType) conditions.push(eq(blogTopics.contentType, opts.contentType));
   if (conditions.length > 0) q = q.where(and(...conditions));
-  q = q.orderBy(desc(blogTopics.priority), desc(blogTopics.traffic));
+  // Build sort order
+  const dir = opts?.sortDir ?? "desc";
+  const col = opts?.sortBy;
+  const sortFn = dir === "asc" ? asc : desc;
+  if (col === "traffic") q = q.orderBy(sortFn(blogTopics.traffic));
+  else if (col === "position") q = q.orderBy(sortFn(blogTopics.position));
+  else if (col === "referringDomains") q = q.orderBy(sortFn(blogTopics.referringDomains));
+  else if (col === "numKeywords") q = q.orderBy(sortFn(blogTopics.numKeywords));
+  else if (col === "keyword") q = q.orderBy(sortFn(blogTopics.keyword));
+  else q = q.orderBy(desc(blogTopics.priority), desc(blogTopics.traffic)); // default
   if (opts?.limit) q = q.limit(opts.limit);
   if (opts?.offset) q = q.offset(opts.offset);
   return q;

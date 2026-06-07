@@ -48,6 +48,9 @@ import {
   AlertCircle,
   CheckCircle,
   GripVertical,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 
 // ─── Type helpers ─────────────────────────────────────────────────────────────
@@ -722,12 +725,68 @@ function SortableTopicRow({
   );
 }
 
+type SortCol = "traffic" | "position" | "referringDomains" | "numKeywords" | "keyword";
+
+function SortableHead({
+  col,
+  label,
+  sortBy,
+  sortDir,
+  onSort,
+  className = "",
+  title,
+}: {
+  col: SortCol;
+  label: string;
+  sortBy: SortCol | null;
+  sortDir: "asc" | "desc";
+  onSort: (col: SortCol) => void;
+  className?: string;
+  title?: string;
+}) {
+  const active = sortBy === col;
+  const Icon = active ? (sortDir === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <TableHead className={className} title={title}>
+      <button
+        onClick={() => onSort(col)}
+        className={`flex items-center gap-1 hover:text-foreground transition-colors ${
+          active ? "text-foreground font-semibold" : "text-muted-foreground"
+        } ${className.includes("text-right") ? "ml-auto" : ""}`}
+      >
+        {label}
+        <Icon className={`w-3 h-3 flex-shrink-0 ${active ? "opacity-100" : "opacity-40"}`} />
+      </button>
+    </TableHead>
+  );
+}
+
 function TopicQueueTab() {
   const [statusFilter, setStatusFilter] = useState<TopicStatus | "all">("pending");
   const [typeFilter, setTypeFilter] = useState<ContentType | "all">("all");
   const [page, setPage] = useState(0);
-  // Local optimistic order for drag — only active when showing pending page 0
+  const [sortBy, setSortBy] = useState<SortCol | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  // Local optimistic order for drag — only active when showing pending page 0 with no active sort
   const [localOrder, setLocalOrder] = useState<TopicRow[] | null>(null);
+
+  // Toggle sort: same col flips direction; new col defaults to desc (except keyword → asc)
+  function handleSort(col: SortCol) {
+    if (sortBy === col) {
+      setSortDir(d => d === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(col);
+      setSortDir(col === "keyword" ? "asc" : "desc");
+    }
+    setLocalOrder(null);
+    setPage(0);
+  }
+
+  function clearSort() {
+    setSortBy(null);
+    setSortDir("desc");
+    setPage(0);
+  }
 
   const utils = trpc.useUtils();
   const { data, isLoading } = trpc.blogPipeline.listTopics.useQuery({
@@ -735,6 +794,8 @@ function TopicQueueTab() {
     contentType: typeFilter === "all" ? undefined : typeFilter,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
+    sortBy: sortBy ?? undefined,
+    sortDir: sortBy ? sortDir : undefined,
   });
 
   // Sync local order when server data changes (and no active drag)
@@ -762,8 +823,8 @@ function TopicQueueTab() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  // Drag is only enabled when filtering pending topics on page 0
-  const dragEnabled = statusFilter === "pending" && page === 0;
+  // Drag is only enabled when filtering pending topics on page 0 with no active column sort
+  const dragEnabled = statusFilter === "pending" && page === 0 && sortBy === null;
 
   const sortableIds = useMemo(
     () => displayTopics.map(t => t.id),
@@ -846,18 +907,26 @@ function TopicQueueTab() {
         </div>
       </div>
 
+      {/* Active sort indicator */}
+      {sortBy && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>Sorted by <strong className="text-foreground">{sortBy === "referringDomains" ? "Ref. Domains" : sortBy === "numKeywords" ? "# Keywords" : sortBy.charAt(0).toUpperCase() + sortBy.slice(1)}</strong> ({sortDir === "asc" ? "low → high" : "high → low"})</span>
+          <button onClick={clearSort} className="underline hover:text-foreground">Clear sort</button>
+        </div>
+      )}
+
       {/* Table */}
       <div className="border rounded-lg overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-8 px-2" />
-              <TableHead>Keyword</TableHead>
+              <SortableHead col="keyword" label="Keyword" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className="" />
               <TableHead className="w-36">Content Type</TableHead>
-              <TableHead className="w-20 text-right">Traffic</TableHead>
-              <TableHead className="w-16 text-right" title="SERP position on competitor site">Pos.</TableHead>
-              <TableHead className="w-16 text-right" title="Referring domains to source page">Ref. D</TableHead>
-              <TableHead className="w-16 text-right" title="Number of keywords ranking for source page"># KWs</TableHead>
+              <SortableHead col="traffic" label="Traffic" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className="w-20 text-right" />
+              <SortableHead col="position" label="Pos." sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className="w-16 text-right" title="SERP position on competitor site" />
+              <SortableHead col="referringDomains" label="Ref. D" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className="w-16 text-right" title="Referring domains to source page" />
+              <SortableHead col="numKeywords" label="# KWs" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className="w-16 text-right" title="Number of keywords ranking for source page" />
               <TableHead className="w-24">Source</TableHead>
               <TableHead className="w-24">Status</TableHead>
               <TableHead className="w-24 text-right">Actions</TableHead>
