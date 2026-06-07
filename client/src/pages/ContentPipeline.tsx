@@ -1,4 +1,21 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { trpc } from "@/lib/trpc";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -30,6 +47,7 @@ import {
   FileUp,
   AlertCircle,
   CheckCircle,
+  GripVertical,
 } from "lucide-react";
 
 // ─── Type helpers ─────────────────────────────────────────────────────────────
@@ -174,7 +192,7 @@ function parseCSV(text: string): { rows: ParsedRow[]; errors: ParseError[] } {
 
 // ─── Bulk Import Dialog ───────────────────────────────────────────────────────
 
-function BulkImportDialog({ onImported }: { onImported: () => void }) {
+function BulkImportDialog({ onImported, prominent }: { onImported: () => void; prominent?: boolean }) {
   const [open, setOpen] = useState(false);
   const [parsed, setParsed] = useState<ParsedRow[] | null>(null);
   const [parseErrors, setParseErrors] = useState<ParseError[]>([]);
@@ -229,10 +247,17 @@ function BulkImportDialog({ onImported }: { onImported: () => void }) {
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)} className="gap-1.5">
-        <Upload className="w-3.5 h-3.5" />
-        Bulk Import
-      </Button>
+      {prominent ? (
+        <Button onClick={() => setOpen(true)} className="gap-2 shrink-0">
+          <Upload className="w-4 h-4" />
+          Upload Topics
+        </Button>
+      ) : (
+        <Button variant="outline" size="sm" onClick={() => setOpen(true)} className="gap-1.5">
+          <Upload className="w-3.5 h-3.5" />
+          Bulk Import
+        </Button>
+      )}
 
       <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { setParsed(null); setFileName(""); } }}>
         <DialogContent className="max-w-2xl">
@@ -492,10 +517,126 @@ function StatsBar() {
 
 const PAGE_SIZE = 50;
 
+type TopicRow = {
+  id: number;
+  keyword: string;
+  contentType: string;
+  traffic: number;
+  source: string;
+  status: string;
+  priority: number;
+  sourceUrl?: string | null;
+};
+
+function SortableTopicRow({
+  topic,
+  onSkip,
+  onRestore,
+  isUpdating,
+  isDragDisabled,
+}: {
+  topic: TopicRow;
+  onSkip: (id: number) => void;
+  onRestore: (id: number) => void;
+  isUpdating: boolean;
+  isDragDisabled: boolean;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: topic.id, disabled: isDragDisabled });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 10 : undefined,
+  };
+
+  return (
+    <TableRow ref={setNodeRef} style={style} className={isDragging ? "bg-muted" : ""}>
+      {/* Drag handle — only shown for pending topics on page 0 */}
+      <TableCell className="w-8 px-2">
+        {!isDragDisabled ? (
+          <button
+            {...attributes}
+            {...listeners}
+            className="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground p-1 rounded"
+            title="Drag to reorder"
+          >
+            <GripVertical className="w-4 h-4" />
+          </button>
+        ) : (
+          <span className="w-6 inline-block" />
+        )}
+      </TableCell>
+      <TableCell className="font-medium max-w-xs">
+        <div className="truncate">{topic.keyword}</div>
+        {topic.sourceUrl && (
+          <a
+            href={topic.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1 mt-0.5"
+          >
+            <ExternalLink className="w-3 h-3" />
+            Source
+          </a>
+        )}
+      </TableCell>
+      <TableCell>
+        <ContentTypeBadge type={topic.contentType as ContentType} />
+      </TableCell>
+      <TableCell className="text-right tabular-nums">
+        {formatTraffic(topic.traffic)}
+      </TableCell>
+      <TableCell>
+        <span className="text-xs text-muted-foreground capitalize">{topic.source}</span>
+      </TableCell>
+      <TableCell>
+        <span className={`text-xs font-medium capitalize ${
+          topic.status === "pending" ? "text-blue-600" :
+          topic.status === "used" ? "text-green-600" : "text-slate-500"
+        }`}>
+          {topic.status}
+        </span>
+      </TableCell>
+      <TableCell className="text-right">
+        <div className="flex justify-end gap-1">
+          {topic.status === "pending" && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              onClick={() => onSkip(topic.id)}
+              disabled={isUpdating}
+              title="Skip this topic"
+            >
+              <SkipForward className="w-3 h-3" />
+            </Button>
+          )}
+          {topic.status === "skipped" && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              onClick={() => onRestore(topic.id)}
+              disabled={isUpdating}
+              title="Restore to pending"
+            >
+              <RotateCcw className="w-3 h-3" />
+            </Button>
+          )}
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+}
+
 function TopicQueueTab() {
   const [statusFilter, setStatusFilter] = useState<TopicStatus | "all">("pending");
   const [typeFilter, setTypeFilter] = useState<ContentType | "all">("all");
   const [page, setPage] = useState(0);
+  // Local optimistic order for drag — only active when showing pending page 0
+  const [localOrder, setLocalOrder] = useState<TopicRow[] | null>(null);
 
   const utils = trpc.useUtils();
   const { data, isLoading } = trpc.blogPipeline.listTopics.useQuery({
@@ -505,13 +646,58 @@ function TopicQueueTab() {
     offset: page * PAGE_SIZE,
   });
 
+  // Sync local order when server data changes (and no active drag)
+  const serverTopics = data?.topics as TopicRow[] | undefined;
+  const displayTopics: TopicRow[] = localOrder ?? serverTopics ?? [];
+
   const updateStatus = trpc.blogPipeline.updateTopicStatus.useMutation({
     onSuccess: () => {
+      setLocalOrder(null);
       utils.blogPipeline.listTopics.invalidate();
       utils.blogPipeline.stats.invalidate();
     },
     onError: (err) => toast.error(err.message),
   });
+
+  const reorder = trpc.blogPipeline.reorderTopics.useMutation({
+    onError: (err) => {
+      toast.error(`Reorder failed: ${err.message}`);
+      setLocalOrder(null); // revert optimistic
+    },
+  });
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  // Drag is only enabled when filtering pending topics on page 0
+  const dragEnabled = statusFilter === "pending" && page === 0;
+
+  const sortableIds = useMemo(
+    () => displayTopics.map(t => t.id),
+    [displayTopics]
+  );
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = displayTopics.findIndex(t => t.id === active.id);
+    const newIndex = displayTopics.findIndex(t => t.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reordered = arrayMove(displayTopics, oldIndex, newIndex);
+    setLocalOrder(reordered);
+
+    // Assign descending priority values so the top item gets the highest number
+    const maxPriority = reordered.length;
+    const items = reordered.map((t, i) => ({
+      id: t.id,
+      priority: maxPriority - i,
+    }));
+    reorder.mutate({ items });
+  }
 
   const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 0;
 
@@ -519,7 +705,7 @@ function TopicQueueTab() {
     <div className="space-y-4">
       {/* Filters + Bulk Import */}
       <div className="flex flex-wrap items-center gap-3">
-        <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v as any); setPage(0); }}>
+        <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v as any); setPage(0); setLocalOrder(null); }}>
           <SelectTrigger className="w-36">
             <SelectValue placeholder="Status" />
           </SelectTrigger>
@@ -531,7 +717,7 @@ function TopicQueueTab() {
           </SelectContent>
         </Select>
 
-        <Select value={typeFilter} onValueChange={(v) => { setTypeFilter(v as any); setPage(0); }}>
+        <Select value={typeFilter} onValueChange={(v) => { setTypeFilter(v as any); setPage(0); setLocalOrder(null); }}>
           <SelectTrigger className="w-40">
             <SelectValue placeholder="Content type" />
           </SelectTrigger>
@@ -550,10 +736,18 @@ function TopicQueueTab() {
           </span>
         )}
 
+        {dragEnabled && (
+          <span className="text-xs text-muted-foreground self-center flex items-center gap-1">
+            <GripVertical className="w-3 h-3" />
+            Drag rows to reorder
+          </span>
+        )}
+
         {/* Push Bulk Import to the right */}
         <div className="ml-auto">
           <BulkImportDialog
             onImported={() => {
+              setLocalOrder(null);
               utils.blogPipeline.listTopics.invalidate();
               utils.blogPipeline.stats.invalidate();
             }}
@@ -566,6 +760,7 @@ function TopicQueueTab() {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-8 px-2" />
               <TableHead>Keyword</TableHead>
               <TableHead className="w-36">Content Type</TableHead>
               <TableHead className="w-24 text-right">Traffic</TableHead>
@@ -578,80 +773,46 @@ function TopicQueueTab() {
             {isLoading ? (
               Array.from({ length: 10 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 6 }).map((_, j) => (
+                  {Array.from({ length: 7 }).map((_, j) => (
                     <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                   ))}
                 </TableRow>
               ))
-            ) : data?.topics.length === 0 ? (
+            ) : displayTopics.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                   No topics found
                 </TableCell>
               </TableRow>
+            ) : dragEnabled ? (
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+                  {displayTopics.map((topic) => (
+                    <SortableTopicRow
+                      key={topic.id}
+                      topic={topic}
+                      onSkip={(id) => updateStatus.mutate({ id, status: "skipped" })}
+                      onRestore={(id) => updateStatus.mutate({ id, status: "pending" })}
+                      isUpdating={updateStatus.isPending}
+                      isDragDisabled={false}
+                    />
+                  ))}
+                </SortableContext>
+              </DndContext>
             ) : (
-              data?.topics.map((topic) => (
-                <TableRow key={topic.id}>
-                  <TableCell className="font-medium max-w-xs">
-                    <div className="truncate">{topic.keyword}</div>
-                    {topic.sourceUrl && (
-                      <a
-                        href={topic.sourceUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1 mt-0.5"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        Source
-                      </a>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <ContentTypeBadge type={topic.contentType as ContentType} />
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {formatTraffic(topic.traffic)}
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-xs text-muted-foreground capitalize">{topic.source}</span>
-                  </TableCell>
-                  <TableCell>
-                    <span className={`text-xs font-medium capitalize ${
-                      topic.status === "pending" ? "text-blue-600" :
-                      topic.status === "used" ? "text-green-600" : "text-slate-500"
-                    }`}>
-                      {topic.status}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
-                      {topic.status === "pending" && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 px-2 text-xs"
-                          onClick={() => updateStatus.mutate({ id: topic.id, status: "skipped" })}
-                          disabled={updateStatus.isPending}
-                          title="Skip this topic"
-                        >
-                          <SkipForward className="w-3 h-3" />
-                        </Button>
-                      )}
-                      {topic.status === "skipped" && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 px-2 text-xs"
-                          onClick={() => updateStatus.mutate({ id: topic.id, status: "pending" })}
-                          disabled={updateStatus.isPending}
-                          title="Restore to pending"
-                        >
-                          <RotateCcw className="w-3 h-3" />
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
+              displayTopics.map((topic) => (
+                <SortableTopicRow
+                  key={topic.id}
+                  topic={topic}
+                  onSkip={(id) => updateStatus.mutate({ id, status: "skipped" })}
+                  onRestore={(id) => updateStatus.mutate({ id, status: "pending" })}
+                  isUpdating={updateStatus.isPending}
+                  isDragDisabled={true}
+                />
               ))
             )}
           </TableBody>
@@ -668,7 +829,7 @@ function TopicQueueTab() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setPage(p => Math.max(0, p - 1))}
+              onClick={() => { setPage(p => Math.max(0, p - 1)); setLocalOrder(null); }}
               disabled={page === 0}
             >
               <ChevronLeft className="w-4 h-4" />
@@ -676,7 +837,7 @@ function TopicQueueTab() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+              onClick={() => { setPage(p => Math.min(totalPages - 1, p + 1)); setLocalOrder(null); }}
               disabled={page >= totalPages - 1}
             >
               <ChevronRight className="w-4 h-4" />
@@ -870,13 +1031,25 @@ function GeneratedPostsTab() {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ContentPipeline() {
+  const utils = trpc.useUtils();
+
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Content Pipeline</h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Automated daily blog post generation from competitor keyword data
-        </p>
+      {/* Page header with prominent Upload CTA */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Content Pipeline</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Automated daily blog post generation from competitor keyword data
+          </p>
+        </div>
+        <BulkImportDialog
+          onImported={() => {
+            utils.blogPipeline.listTopics.invalidate();
+            utils.blogPipeline.stats.invalidate();
+          }}
+          prominent
+        />
       </div>
 
       <StatsBar />

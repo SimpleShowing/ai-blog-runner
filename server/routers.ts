@@ -22,6 +22,9 @@ import {
   getGeneratedPosts, countGeneratedPosts,
 } from "./db";
 import { ENV } from "./_core/env";
+import { getDb } from "./db";
+import { blogTopics } from "../drizzle/schema";
+import { eq } from "drizzle-orm";
 import { generateImage } from "./_core/imageGeneration";
 import { storageGetSignedUrl } from "./storage";
 import {
@@ -1219,6 +1222,24 @@ const blogPipelineRouter = router({
     }))
     .mutation(async ({ input }) => {
       await updateBlogTopicStatus(input.id, input.status);
+      return { success: true };
+    }),
+
+  /** Reorder topics by setting explicit priority values (drag-to-reorder) */
+  reorderTopics: adminProcedure
+    .input(z.object({
+      // Array of { id, priority } — the client sends the new desired order
+      items: z.array(z.object({ id: z.number(), priority: z.number() })),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+      // Update each topic's priority in parallel
+      await Promise.all(
+        input.items.map(({ id, priority }) =>
+          db.update(blogTopics).set({ priority }).where(eq(blogTopics.id, id))
+        )
+      );
       return { success: true };
     }),
 

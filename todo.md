@@ -120,3 +120,10 @@
 - [x] Create /content-pipeline page: stats bar (pending/used/skipped/posts/published), daily job status + setup button, Topic Queue tab (filters: status, content type; skip/restore actions; pagination), Generated Posts tab (filters: type, status, affiliate-only; WP link; affiliate flag badge)
 - [x] Register /content-pipeline route in App.tsx
 - [x] Vitest tests: 8 new tests for blogPipeline router (51 total, all passing, 0 TS errors)
+
+## Phase 15: Content Pipeline Priority & Upload UX
+
+- [x] Add updateTopicPriority tRPC mutation (single topic priority update)
+- [x] Add reorderTopics tRPC mutation (bulk priority reorder from drag result)
+- [x] Add drag-to-reorder UI with GripVertical handle on Content Pipeline topic queue
+- [x] Promote Bulk Import to a prominent Upload CTA on the Content Pipeline page header
