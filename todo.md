@@ -138,9 +138,17 @@
 
 ## Phase 18: Content Pipeline CSV Fix & Queue UX
 
-- [ ] Add sourceUrl column to blog_topics schema and migrate
-- [ ] Fix CSV parser: handle UTF-16 BOM/encoding, map 'Source' → sourceUrl, 'Current traffic' → traffic, 'Conent Type' typo → contentType
-- [ ] Update seedTopics tRPC input to accept sourceUrl
-- [ ] Render source column as a clickable hyperlink (label = hostname, href = sourceUrl)
-- [ ] Add delete checkboxes with bulk delete action to topic queue
-- [ ] Remove redundant "Bulk Import" button from filters row (keep only "Upload Topics" in header)
+- [x] Add sourceUrl column to blog_topics schema and migrate
+- [x] Fix CSV parser: handle UTF-16 BOM/encoding, map 'Source' → sourceUrl, 'Current traffic' → traffic, 'Conent Type' typo → contentType
+- [x] Update seedTopics tRPC input to accept sourceUrl
+- [x] Render source column as a clickable hyperlink (label = hostname, href = sourceUrl)
+- [x] Add delete checkboxes with bulk delete action to topic queue
+- [x] Remove redundant "Bulk Import" button from filters row (keep only "Upload Topics" in header)
+
+## Phase 19: Pipeline → Drafts Mirror & Bulk Generate
+
+- [ ] Update blogPostGenerator.ts: after successful WP publish, create a mirror record in the drafts table (status: published, wpPostId set, content = generated HTML)
+- [ ] Add createDraftFromPipeline DB helper in db.ts
+- [ ] Add bulkGenerateTopics tRPC mutation to blogPipelineRouter (accepts array of topicIds, runs generateForTopic sequentially)
+- [ ] Add "Generate All Selected" button to the bulk-action toolbar in ContentPipeline.tsx (shown when checkboxes are selected alongside Delete)
+- [ ] Show progress toast during bulk generate (e.g. "Generating 1 of 5...")

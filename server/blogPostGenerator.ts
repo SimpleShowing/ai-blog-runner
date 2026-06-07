@@ -23,6 +23,7 @@ import {
   updateGeneratedPost,
   getSetting,
   getDb,
+  createDraft,
 } from "./db";
 import { blogTopics } from "../drizzle/schema";
 import type { BlogTopic } from "../drizzle/schema";
@@ -344,7 +345,7 @@ Write the full post now:`;
       return { ok: false, error: "wp-publish-failed", message: err.message };
     }
 
-    // 7. Mark topic as used, update generated post record
+    // 7. Mark topic as used, update generated post record, mirror to drafts table
     await Promise.all([
       updateBlogTopicStatus(topic.id, "used"),
       updateGeneratedPost(postId, {
@@ -354,6 +355,19 @@ Write the full post now:`;
         wpPostUrl,
         status: "published",
         publishedAt: new Date(),
+      }),
+      // Mirror to drafts table so the post appears in Drafts & Review
+      createDraft({
+        topicId: 0, // pipeline posts don't have a topics table entry; use 0 as sentinel
+        title: postTitle,
+        content: generatedContent,
+        seoTitle: postTitle,
+        metaDescription: metaDescription || "",
+        focusKeyword: topic.keyword,
+        wpPostId: wpPostId ?? undefined,
+        wpPostUrl: wpPostUrl ?? undefined,
+        status: "published",
+        generatedBy: "pipeline",
       }),
     ]);
 

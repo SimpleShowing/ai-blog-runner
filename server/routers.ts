@@ -1368,6 +1368,29 @@ const blogPipelineRouter = router({
     return { ok: true as const, postId: result.postId, wpPostId: result.wpPostId, wpPostUrl: result.wpPostUrl, title: result.title };
   }),
 
+  /** Bulk generate posts for multiple specific topics sequentially */
+  bulkGenerateTopics: adminProcedure
+    .input(z.object({ topicIds: z.array(z.number()).min(1).max(20) }))
+    .mutation(async ({ input }) => {
+      const { runBlogPostGeneration } = await import("./blogPostGenerator");
+      const results: Array<{ topicId: number; ok: boolean; title?: string; wpPostUrl?: string; error?: string }> = [];
+      for (const topicId of input.topicIds) {
+        try {
+          const result = await runBlogPostGeneration(topicId);
+          if (result.ok) {
+            results.push({ topicId, ok: true, title: result.title, wpPostUrl: result.wpPostUrl });
+          } else {
+            results.push({ topicId, ok: false, error: (result as any).error || (result as any).skipped || "failed" });
+          }
+        } catch (err: any) {
+          results.push({ topicId, ok: false, error: err.message });
+        }
+      }
+      const succeeded = results.filter(r => r.ok).length;
+      const failed = results.filter(r => !r.ok).length;
+      return { results, succeeded, failed };
+    }),
+
   /** Get the status of the daily job */
   getDailyJobStatus: adminProcedure.query(async ({ ctx }) => {
     const sessionToken = parseCookie(ctx.req.headers.cookie ?? "")[COOKIE_NAME] ?? "";

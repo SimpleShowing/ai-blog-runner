@@ -887,6 +887,33 @@ function TopicQueueTab() {
     onError: (err) => toast.error(`Delete failed: ${err.message}`),
   });
 
+  const [bulkGenerateProgress, setBulkGenerateProgress] = useState<{ current: number; total: number } | null>(null);
+
+  const bulkGenerate = trpc.blogPipeline.bulkGenerateTopics.useMutation({
+    onSuccess: (data) => {
+      setBulkGenerateProgress(null);
+      setSelectedIds(new Set());
+      if (data.succeeded > 0) {
+        toast.success(`Generated ${data.succeeded} post${data.succeeded !== 1 ? "s" : ""} successfully${data.failed > 0 ? `, ${data.failed} failed` : ""}`, { duration: 8000 });
+      } else {
+        toast.error(`All ${data.failed} generation${data.failed !== 1 ? "s" : ""} failed`);
+      }
+      utils.blogPipeline.listTopics.invalidate();
+      utils.blogPipeline.stats.invalidate();
+      utils.blogPipeline.listPosts.invalidate();
+    },
+    onError: (err) => {
+      setBulkGenerateProgress(null);
+      toast.error(`Bulk generation failed: ${err.message}`);
+    },
+  });
+
+  function handleBulkGenerate() {
+    const ids = Array.from(selectedIds);
+    setBulkGenerateProgress({ current: 0, total: ids.length });
+    bulkGenerate.mutate({ topicIds: ids });
+  }
+
   const generateForTopic = trpc.blogPipeline.generateForTopic.useMutation({
     onSuccess: (data) => {
       setGeneratingId(null);
@@ -1001,21 +1028,35 @@ function TopicQueueTab() {
 
       </div>
 
-      {/* Bulk delete toolbar — shown when rows are selected */}
+      {/* Bulk action toolbar — shown when rows are selected */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 px-3 py-2 bg-destructive/10 border border-destructive/20 rounded-lg">
+        <div className="flex items-center gap-3 px-3 py-2 bg-muted/60 border border-border rounded-lg">
           <span className="text-sm font-medium">{selectedIds.size} selected</span>
+          <Button
+            size="sm"
+            variant="default"
+            className="h-7 gap-1"
+            onClick={handleBulkGenerate}
+            disabled={bulkGenerate.isPending || generatingId !== null}
+          >
+            {bulkGenerate.isPending
+              ? <RefreshCw className="w-3 h-3 animate-spin" />
+              : <Wand2 className="w-3 h-3" />}
+            {bulkGenerate.isPending && bulkGenerateProgress
+              ? `Generating ${bulkGenerateProgress.current + 1} of ${bulkGenerateProgress.total}...`
+              : `Generate ${selectedIds.size > 1 ? `${selectedIds.size} posts` : "post"}`}
+          </Button>
           <Button
             size="sm"
             variant="destructive"
             className="h-7 gap-1"
             onClick={() => deleteTopics.mutate({ ids: Array.from(selectedIds) })}
-            disabled={deleteTopics.isPending}
+            disabled={deleteTopics.isPending || bulkGenerate.isPending}
           >
             {deleteTopics.isPending
               ? <RefreshCw className="w-3 h-3 animate-spin" />
               : <Trash2 className="w-3 h-3" />}
-            Delete selected
+            Delete
           </Button>
           <button
             className="text-xs text-muted-foreground hover:text-foreground underline ml-auto"
