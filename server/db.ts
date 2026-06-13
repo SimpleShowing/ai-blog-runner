@@ -1,5 +1,6 @@
-import { eq, desc, and, isNotNull, ne, inArray } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { eq, desc, and, isNotNull, ne, inArray, asc, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import {
   InsertUser,
   users,
@@ -12,6 +13,9 @@ import {
   settings,
   invitedEditors,
   partnerSubmissions,
+  blogTopics,
+  generatedPosts,
+  postRefreshLog,
   type Topic,
   type InsertTopic,
   type Brief,
@@ -22,6 +26,12 @@ import {
   type Setting,
   type PartnerSubmission,
   type InsertPartnerSubmission,
+  type BlogTopic,
+  type InsertBlogTopic,
+  type GeneratedPost,
+  type InsertGeneratedPost,
+  type InsertPostRefreshLog,
+  type PostRefreshLog,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -30,7 +40,8 @@ let _db: ReturnType<typeof drizzle> | null = null;
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      const client = postgres(process.env.DATABASE_URL, { max: 10 });
+      _db = drizzle(client);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -74,7 +85,10 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   if (!values.lastSignedIn) values.lastSignedIn = new Date();
   if (Object.keys(updateSet).length === 0) updateSet.lastSignedIn = new Date();
 
-  await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
+  await db
+    .insert(users)
+    .values(values)
+    .onConflictDoUpdate({ target: users.openId, set: updateSet });
 }
 
 export async function getUserByOpenId(openId: string) {
@@ -95,7 +109,11 @@ export async function getAllUsers() {
 export async function getInvitedEditors() {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(invitedEditors).where(eq(invitedEditors.isActive, true)).orderBy(desc(invitedEditors.createdAt));
+  return db
+    .select()
+    .from(invitedEditors)
+    .where(eq(invitedEditors.isActive, true))
+    .orderBy(desc(invitedEditors.createdAt));
 }
 
 export async function inviteEditor(email: string, name: string | null, invitedBy: number) {
@@ -110,7 +128,6 @@ export async function removeEditor(id: number) {
   await db.update(invitedEditors).set({ isActive: false }).where(eq(invitedEditors.id, id));
 }
 
-// Emails and domains that always have admin access (no invite required).
 const ADMIN_EMAILS = new Set(["fredmcgill@gmail.com", "fred@simpleshowing.com"]);
 function isAdminEmail(email: string): boolean {
   const lower = email.toLowerCase();
@@ -118,9 +135,7 @@ function isAdminEmail(email: string): boolean {
 }
 
 export async function isEmailAllowed(email: string, openId: string): Promise<boolean> {
-  // Owner by openId (Manus auth)
   if (openId === ENV.ownerOpenId) return true;
-  // Admin emails + entire @simpleshowing.com domain
   if (email && isAdminEmail(email)) return true;
   const db = await getDb();
   if (!db) return false;
@@ -157,8 +172,8 @@ export async function getTopicById(id: number) {
 export async function createTopic(data: InsertTopic) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  const [result] = await db.insert(topics).values(data);
-  return (result as any).insertId as number;
+  const [result] = await db.insert(topics).values(data).returning({ id: topics.id });
+  return result.id;
 }
 
 export async function updateTopic(id: number, data: Partial<InsertTopic>) {
@@ -178,7 +193,12 @@ export async function deleteTopic(id: number) {
 export async function getBriefByTopicId(topicId: number) {
   const db = await getDb();
   if (!db) return undefined;
-  const result = await db.select().from(briefs).where(eq(briefs.topicId, topicId)).orderBy(desc(briefs.createdAt)).limit(1);
+  const result = await db
+    .select()
+    .from(briefs)
+    .where(eq(briefs.topicId, topicId))
+    .orderBy(desc(briefs.createdAt))
+    .limit(1);
   return result[0];
 }
 
@@ -192,8 +212,8 @@ export async function getBriefById(id: number) {
 export async function createBrief(data: InsertBrief) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  const [result] = await db.insert(briefs).values(data);
-  return (result as any).insertId as number;
+  const [result] = await db.insert(briefs).values(data).returning({ id: briefs.id });
+  return result.id;
 }
 
 export async function updateBrief(id: number, data: Partial<InsertBrief>) {
@@ -226,8 +246,8 @@ export async function getAllDrafts() {
 export async function createDraft(data: InsertDraft) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  const [result] = await db.insert(drafts).values(data);
-  return (result as any).insertId as number;
+  const [result] = await db.insert(drafts).values(data).returning({ id: drafts.id });
+  return result.id;
 }
 
 export async function updateDraft(id: number, data: Partial<InsertDraft>) {
@@ -241,15 +261,20 @@ export async function updateDraft(id: number, data: Partial<InsertDraft>) {
 export async function getLatestQaForDraft(draftId: number) {
   const db = await getDb();
   if (!db) return undefined;
-  const result = await db.select().from(qaResults).where(eq(qaResults.draftId, draftId)).orderBy(desc(qaResults.runAt)).limit(1);
+  const result = await db
+    .select()
+    .from(qaResults)
+    .where(eq(qaResults.draftId, draftId))
+    .orderBy(desc(qaResults.runAt))
+    .limit(1);
   return result[0];
 }
 
 export async function createQaResult(data: typeof qaResults.$inferInsert) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  const [result] = await db.insert(qaResults).values(data);
-  return (result as any).insertId as number;
+  const [result] = await db.insert(qaResults).values(data).returning({ id: qaResults.id });
+  return result.id;
 }
 
 // ─── Comments ─────────────────────────────────────────────────────────────────
@@ -257,14 +282,18 @@ export async function createQaResult(data: typeof qaResults.$inferInsert) {
 export async function getCommentsByDraftId(draftId: number) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(comments).where(eq(comments.draftId, draftId)).orderBy(desc(comments.createdAt));
+  return db
+    .select()
+    .from(comments)
+    .where(eq(comments.draftId, draftId))
+    .orderBy(desc(comments.createdAt));
 }
 
 export async function createComment(data: typeof comments.$inferInsert) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  const [result] = await db.insert(comments).values(data);
-  return (result as any).insertId as number;
+  const [result] = await db.insert(comments).values(data).returning({ id: comments.id });
+  return result.id;
 }
 
 export async function resolveComment(id: number) {
@@ -278,14 +307,18 @@ export async function resolveComment(id: number) {
 export async function getWpLogsForDraft(draftId: number) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(wpPublishLogs).where(eq(wpPublishLogs.draftId, draftId)).orderBy(desc(wpPublishLogs.pushedAt));
+  return db
+    .select()
+    .from(wpPublishLogs)
+    .where(eq(wpPublishLogs.draftId, draftId))
+    .orderBy(desc(wpPublishLogs.pushedAt));
 }
 
 export async function createWpLog(data: typeof wpPublishLogs.$inferInsert) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  const [result] = await db.insert(wpPublishLogs).values(data);
-  return (result as any).insertId as number;
+  const [result] = await db.insert(wpPublishLogs).values(data).returning({ id: wpPublishLogs.id });
+  return result.id;
 }
 
 export async function getAllWpLogs() {
@@ -334,7 +367,7 @@ export async function setSetting(key: string, value: string) {
   await db
     .insert(settings)
     .values({ key, value })
-    .onDuplicateKeyUpdate({ set: { value } });
+    .onConflictDoUpdate({ target: settings.key, set: { value } });
 }
 
 export async function setSettings(pairs: Record<string, string>) {
@@ -350,33 +383,20 @@ export async function createPartnerSubmission(
 ): Promise<PartnerSubmission> {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  const [result] = await db.insert(partnerSubmissions).values(data);
-  const id = (result as { insertId: number }).insertId;
-  const [row] = await db
-    .select()
-    .from(partnerSubmissions)
-    .where(eq(partnerSubmissions.id, id));
+  const [row] = await db.insert(partnerSubmissions).values(data).returning();
   return row;
 }
 
 export async function getPartnerSubmissions(): Promise<PartnerSubmission[]> {
   const db = await getDb();
   if (!db) return [];
-  return db
-    .select()
-    .from(partnerSubmissions)
-    .orderBy(desc(partnerSubmissions.createdAt));
+  return db.select().from(partnerSubmissions).orderBy(desc(partnerSubmissions.createdAt));
 }
 
-export async function getPartnerSubmissionById(
-  id: number
-): Promise<PartnerSubmission | null> {
+export async function getPartnerSubmissionById(id: number): Promise<PartnerSubmission | null> {
   const db = await getDb();
   if (!db) return null;
-  const [row] = await db
-    .select()
-    .from(partnerSubmissions)
-    .where(eq(partnerSubmissions.id, id));
+  const [row] = await db.select().from(partnerSubmissions).where(eq(partnerSubmissions.id, id));
   return row ?? null;
 }
 
@@ -386,13 +406,9 @@ export async function updatePartnerSubmission(
 ): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  await db
-    .update(partnerSubmissions)
-    .set(data)
-    .where(eq(partnerSubmissions.id, id));
+  await db.update(partnerSubmissions).set(data).where(eq(partnerSubmissions.id, id));
 }
 
-/** All submissions that have been published (have a publishedAt timestamp), ordered by most recently published. */
 export async function getPublishedSubmissionsWithPayment(): Promise<PartnerSubmission[]> {
   const db = await getDb();
   if (!db) return [];
@@ -403,7 +419,6 @@ export async function getPublishedSubmissionsWithPayment(): Promise<PartnerSubmi
     .orderBy(desc(partnerSubmissions.publishedAt));
 }
 
-/** Published submissions where payment is not yet confirmed (paymentStatus != 'paid'). */
 export async function getUnpaidSubmissions(): Promise<PartnerSubmission[]> {
   const db = await getDb();
   if (!db) return [];
@@ -421,26 +436,18 @@ export async function getUnpaidSubmissions(): Promise<PartnerSubmission[]> {
 
 // ─── Blog Topics ──────────────────────────────────────────────────────────────
 
-import {
-  blogTopics,
-  generatedPosts,
-  type BlogTopic,
-  type InsertBlogTopic,
-  type GeneratedPost,
-  type InsertGeneratedPost,
-} from "../drizzle/schema";
-import { asc, sql, lt } from "drizzle-orm";
-
 export async function bulkInsertBlogTopics(rows: InsertBlogTopic[]): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   if (rows.length === 0) return 0;
-  // Insert in batches of 500 to avoid packet size limits
   const BATCH = 500;
   let inserted = 0;
   for (let i = 0; i < rows.length; i += BATCH) {
     const batch = rows.slice(i, i + BATCH);
-    await db.insert(blogTopics).values(batch).onDuplicateKeyUpdate({ set: { keyword: sql`keyword` } });
+    await db
+      .insert(blogTopics)
+      .values(batch)
+      .onConflictDoUpdate({ target: blogTopics.keyword, set: { keyword: sql`EXCLUDED.keyword` } });
     inserted += batch.length;
   }
   return inserted;
@@ -461,7 +468,6 @@ export async function getBlogTopics(opts?: {
   if (opts?.status) conditions.push(eq(blogTopics.status, opts.status));
   if (opts?.contentType) conditions.push(eq(blogTopics.contentType, opts.contentType));
   if (conditions.length > 0) q = q.where(and(...conditions));
-  // Build sort order
   const dir = opts?.sortDir ?? "desc";
   const col = opts?.sortBy;
   const sortFn = dir === "asc" ? asc : desc;
@@ -470,7 +476,7 @@ export async function getBlogTopics(opts?: {
   else if (col === "referringDomains") q = q.orderBy(sortFn(blogTopics.referringDomains));
   else if (col === "numKeywords") q = q.orderBy(sortFn(blogTopics.numKeywords));
   else if (col === "keyword") q = q.orderBy(sortFn(blogTopics.keyword));
-  else q = q.orderBy(desc(blogTopics.priority), desc(blogTopics.traffic)); // default
+  else q = q.orderBy(desc(blogTopics.priority), desc(blogTopics.traffic));
   if (opts?.limit) q = q.limit(opts.limit);
   if (opts?.offset) q = q.offset(opts.offset);
   return q;
@@ -504,7 +510,10 @@ export async function getNextPendingBlogTopic(): Promise<BlogTopic | null> {
   return result[0] ?? null;
 }
 
-export async function updateBlogTopicStatus(id: number, status: BlogTopic["status"]): Promise<void> {
+export async function updateBlogTopicStatus(
+  id: number,
+  status: BlogTopic["status"]
+): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   await db.update(blogTopics).set({ status }).where(eq(blogTopics.id, id));
@@ -515,11 +524,14 @@ export async function updateBlogTopicStatus(id: number, status: BlogTopic["statu
 export async function createGeneratedPost(data: InsertGeneratedPost): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  const [result] = await db.insert(generatedPosts).values(data);
-  return (result as { insertId: number }).insertId;
+  const [result] = await db.insert(generatedPosts).values(data).returning({ id: generatedPosts.id });
+  return result.id;
 }
 
-export async function updateGeneratedPost(id: number, data: Partial<InsertGeneratedPost>): Promise<void> {
+export async function updateGeneratedPost(
+  id: number,
+  data: Partial<InsertGeneratedPost>
+): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   await db.update(generatedPosts).set(data).where(eq(generatedPosts.id, id));
@@ -556,7 +568,8 @@ export async function getGeneratedPosts(opts?: {
   const conditions = [];
   if (opts?.contentType) conditions.push(eq(generatedPosts.contentType, opts.contentType));
   if (opts?.status) conditions.push(eq(generatedPosts.status, opts.status));
-  if (opts?.affiliateFlag !== undefined) conditions.push(eq(generatedPosts.affiliateFlag, opts.affiliateFlag));
+  if (opts?.affiliateFlag !== undefined)
+    conditions.push(eq(generatedPosts.affiliateFlag, opts.affiliateFlag));
   if (conditions.length > 0) q = q.where(and(...conditions));
   q = q.orderBy(desc(generatedPosts.createdAt));
   if (opts?.limit) q = q.limit(opts.limit);
@@ -585,4 +598,38 @@ export async function bulkDeleteBlogTopics(ids: number[]) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   await db.delete(blogTopics).where(inArray(blogTopics.id, ids));
+}
+
+// ─── Post Refresh Log ─────────────────────────────────────────────────────────
+
+export async function createRefreshLog(data: InsertPostRefreshLog): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const [result] = await db.insert(postRefreshLog).values(data).returning({ id: postRefreshLog.id });
+  return result.id;
+}
+
+export async function updateRefreshLog(
+  id: number,
+  data: Partial<InsertPostRefreshLog>
+): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(postRefreshLog).set(data).where(eq(postRefreshLog.id, id));
+}
+
+export async function getRefreshHistory(): Promise<PostRefreshLog[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(postRefreshLog).orderBy(desc(postRefreshLog.createdAt)).limit(200);
+}
+
+export async function getRefreshedPostIds(): Promise<number[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({ wpPostId: postRefreshLog.wpPostId })
+    .from(postRefreshLog)
+    .where(eq(postRefreshLog.status, "done"));
+  return rows.map((r) => r.wpPostId);
 }
