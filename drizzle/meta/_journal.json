@@ -1,54 +1,12 @@
 {
   "version": "7",
-  "dialect": "mysql",
+  "dialect": "postgresql",
   "entries": [
     {
       "idx": 0,
-      "version": "5",
-      "when": 1780705423110,
-      "tag": "0000_known_joshua_kane",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "5",
-      "when": 1780705576430,
-      "tag": "0001_light_tiger_shark",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "5",
-      "when": 1780706120982,
-      "tag": "0002_short_mentallo",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "5",
-      "when": 1780761404580,
-      "tag": "0003_shocking_obadiah_stane",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "5",
-      "when": 1780780749060,
-      "tag": "0004_steep_lake",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "5",
-      "when": 1780790649939,
-      "tag": "0005_jazzy_molten_man",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "5",
-      "when": 1780794826031,
-      "tag": "0006_melted_martin_li",
+      "version": "7",
+      "when": 1781370534553,
+      "tag": "0000_lonely_starbolt",
       "breakpoints": true
     }
   ]

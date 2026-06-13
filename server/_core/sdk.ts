@@ -43,7 +43,7 @@ class SDKServer {
     return new SignJWT({ openId, name: opts.name })
       .setProtectedHeader({ alg: "HS256" })
       .setIssuedAt()
-      .setExpirationTime(Date.now() + expiresInMs + "ms" as any)
+      .setExpirationTime(new Date(Date.now() + expiresInMs))
       .sign(secret);
   }
 
