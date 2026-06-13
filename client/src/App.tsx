@@ -1,3 +1,4 @@
+import PostRefresh from "./pages/PostRefresh";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
@@ -47,6 +48,7 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
 function Router() {
   return (
     <Switch>
+      <Route path="/post-refresh" component={() => <ProtectedRoute component={PostRefresh} />} />
       <Route path="/" component={() => <ProtectedRoute component={Dashboard} />} />
       <Route path="/topics" component={() => <ProtectedRoute component={Topics} />} />
       <Route path="/topics/:id" component={() => <ProtectedRoute component={TopicDetail} />} />
