@@ -1484,7 +1484,7 @@ const postRefreshRouter = router({
       const refreshed = db ? await db.select({ wpPostId: postRefreshLog.wpPostId, action: postRefreshLog.action, processedAt: postRefreshLog.processedAt }).from(postRefreshLog) : [];
       const refreshedMap = new Map(refreshed.map(r => [r.wpPostId, r]));
       return posts.map(p => {
-        const decision = triagePost(p.slug, 99, 0);
+        const decision = triagePost(p.slug, 0, 0);
         const existing = refreshedMap.get(p.id);
         return { id: p.id, slug: p.slug, title: p.title.rendered, link: p.link, dateModified: p.date_modified, decision, hasKeywordMap: !!KEYWORD_MAP[p.slug], isNoindexSlug: NOINDEX_SLUGS.has(p.slug), alreadyProcessed: !!existing, lastAction: existing?.action ?? null, lastProcessedAt: existing?.processedAt ?? null };
       });
