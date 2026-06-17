@@ -273,7 +273,7 @@ export default function PartnerSubmissions() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Partner Submissions</h1>
+            <h1 className="text-2xl font-bold text-white">Partner Submissions</h1>
             <p className="text-slate-500 text-sm mt-0.5">
               Review guest posts and link insertion requests from affiliate partners.
             </p>

@@ -212,7 +212,7 @@ export default function PartnerSubmit() {
       <div className="bg-white border-b border-slate-200 shadow-sm">
         <div className="max-w-3xl mx-auto px-6 py-5 flex items-center gap-3">
           <img
-            src="/manus-storage/simpleshowing-icon_c9107b37.png"
+            src="/ss-icon.png"
             alt="SimpleShowing"
             className="h-9 w-9 rounded-lg object-contain"
           />
@@ -507,7 +507,7 @@ export default function PartnerSubmit() {
               )}
 
               {fields.map((field, index) => (
-                <div key={field.id} className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+                <div key={field.id} className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
                   <div className="flex items-center justify-between">
                     <div className="flex gap-1.5 flex-wrap">
                       {(["do_follow", "internal", "authoritative"] as LinkType[]).map((lt) => (
