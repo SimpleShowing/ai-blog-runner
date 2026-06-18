@@ -119,7 +119,7 @@ export async function getInvitedEditors() {
 export async function inviteEditor(email: string, name: string | null, invitedBy: number) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  await db.insert(invitedEditors).values({ email, name, invitedBy, isActive: true });
+  await db.insert(invitedEditors).values({ email, name, invitedBy, isActive: true }).onConflictDoUpdate({ target: invitedEditors.email, set: { name, invitedBy, isActive: true } });
 }
 
 export async function removeEditor(id: number) {
