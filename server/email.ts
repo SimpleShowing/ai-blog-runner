@@ -245,3 +245,30 @@ export async function sendPartnerRemovedUnpaid(opts: {
     console.error("[email] sendPartnerRemovedUnpaid failed:", err);
   }
 }
+
+/** Invite email sent to a new editor when an admin adds them to the dashboard. */
+export async function sendEditorInvite(opts: {
+  to: string;
+  name: string | null;
+}): Promise<void> {
+  try {
+    const resend = getResend();
+    if (!resend) return;
+    const greeting = opts.name ? `Hi ${opts.name},` : "Hi,";
+    await resend.emails.send({
+      from: FROM,
+      to: opts.to,
+      subject: "You've been invited to the SimpleShowing Content Dashboard",
+      html: `
+        <p>${greeting}</p>
+        <p>You've been invited to access the SimpleShowing Content Operations dashboard.</p>
+        <p>To get started, simply sign in with your Google account at the link below — make sure to use the email address this invitation was sent to (<strong>${opts.to}</strong>).</p>
+        <p><a href="https://dash.simpleshowing.co" style="background:#0d9488;color:white;padding:10px 20px;text-decoration:none;border-radius:4px;display:inline-block">Access the Dashboard</a></p>
+        <p>If you have any questions, reply to this email and we'll help you get set up.</p>
+        <p>Best,<br/>The SimpleShowing Team</p>
+      `,
+    });
+  } catch (err) {
+    console.error("[email] sendEditorInvite failed:", err);
+  }
+}

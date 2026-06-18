@@ -32,6 +32,7 @@ import {
   sendPartnerApproved,
   sendPartnerRejected,
   sendPartnerPublished,
+  sendEditorInvite,
 } from "./email";
 import { createPartnerPaymentLink, getPriceForSubmission } from "./stripe";
 import { schedulePaymentReminders } from "./scheduleReminders";
@@ -835,6 +836,7 @@ const editorsRouter = router({
     .input(z.object({ email: z.string().email(), name: z.string().optional() }))
     .mutation(async ({ input, ctx }) => {
       await inviteEditor(input.email, input.name || null, ctx.user.id);
+      await sendEditorInvite({ to: input.email, name: input.name || null });
       return { success: true };
     }),
 
