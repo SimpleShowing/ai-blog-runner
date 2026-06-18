@@ -635,7 +635,7 @@ export default function PartnerSubmit() {
               disabled={isSubmitting || submitMutation.isPending || docxUploading}
               className="bg-teal-600 hover:bg-teal-700 text-white px-8"
             >
-              {submitMutation.isPending || docxUploading ? "Submitting..." : "Submit Article"}
+              {submitMutation.isPending || docxUploading ? "Submitting..." : submissionType === "link_insertion" ? "Submit Link" : "Submit Article"}
             </Button>
           </div>
         </form>
