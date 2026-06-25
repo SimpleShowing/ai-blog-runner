@@ -762,10 +762,14 @@ const wordpressRouter = router({
           await updateTopic(input.topicId, { status: "published" });
 
           const categoriesNote = categoryNames.length > 0 ? `\nCategories: ${categoryNames.join(", ")}` : "";
-          await notifyOwner({
-            title: "Post Published to WordPress",
-            content: `"${draft.title}" has been pushed to WordPress as ${input.wpPostStatus}.\nPost ID: ${wpPostId}\nView post: ${wpPostUrl}${categoriesNote}`,
-          });
+          try {
+            await notifyOwner({
+              title: "Post Published to WordPress",
+              content: `"${draft.title}" has been pushed to WordPress as ${input.wpPostStatus}.\nPost ID: ${wpPostId}\nView post: ${wpPostUrl}${categoriesNote}`,
+            });
+          } catch (err) {
+            console.warn('[notifyOwner] non-blocking failure:', err);
+          }
         } else {
           errorMessage = data.message || `HTTP ${response.status}`;
         }
@@ -914,11 +918,15 @@ const partnerSubmissionsRouter = router({
         status: "pending",
       });
 
-      // Notify owner of new submission
-      await notifyOwner({
-        title: `New Partner Submission: ${input.title}`,
-        content: `Partner: ${input.partnerName} (${input.partnerEmail})\nType: ${input.submissionType}\nTitle: ${input.title}\nLink QA: ${linkQaStatus}${flagged.length > 0 ? ` — ${linkQaDetails}` : ""}\n\nReview it in the dashboard.`,
-      });
+      // Notify owner of new submission (best-effort, never block submission)
+      try {
+        await notifyOwner({
+          title: `New Partner Submission: ${input.title}`,
+          content: `Partner: ${input.partnerName} (${input.partnerEmail})\nType: ${input.submissionType}\nTitle: ${input.title}\nLink QA: ${linkQaStatus}${flagged.length > 0 ? ` — ${linkQaDetails}` : ""}\n\nReview it in the dashboard.`,
+        });
+      } catch (err) {
+        console.warn('[notifyOwner] non-blocking failure:', err);
+      }
 
       // Email partner: submission received
       await sendPartnerSubmissionReceived({
@@ -964,10 +972,14 @@ const partnerSubmissionsRouter = router({
       // Notify owner
       const sub = await getPartnerSubmissionById(input.id);
       if (sub) {
-        await notifyOwner({
-          title: `Submission Approved: ${sub.title}`,
-          content: `The submission "${sub.title}" by ${sub.partnerName} (${sub.partnerEmail}) has been approved and is ready to publish.`,
-        });
+        try {
+          await notifyOwner({
+            title: `Submission Approved: ${sub.title}`,
+            content: `The submission "${sub.title}" by ${sub.partnerName} (${sub.partnerEmail}) has been approved and is ready to publish.`,
+          });
+        } catch (err) {
+          console.warn('[notifyOwner] non-blocking failure:', err);
+        }
         // Email partner: approved
         await sendPartnerApproved({
           to: sub.partnerEmail,
