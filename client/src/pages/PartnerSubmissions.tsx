@@ -162,6 +162,17 @@ export default function PartnerSubmissions() {
       if (selected) setSelected(null);
     },
   });
+  const approveAndPublish = trpc.partnerSubmissions.approveAndPublish.useMutation({
+    onSuccess: () => {
+      toast.success("Approved and published to WordPress!");
+      utils.partnerSubmissions.list.invalidate();
+      setSelected(null);
+    },
+    onError: (err) => {
+      toast.error("Approve & Publish failed", { description: err.message });
+    },
+  });
+
 
   const reject = trpc.partnerSubmissions.reject.useMutation({
     onSuccess: () => {
@@ -425,10 +436,10 @@ export default function PartnerSubmissions() {
                             <Button
                               size="sm"
                               className="h-7 px-2 text-xs bg-green-600 hover:bg-green-700 text-white"
-                              onClick={() => approve.mutate({ id: sub.id })}
-                              disabled={approve.isPending}
+                              onClick={() => approveAndPublish.mutate({ id: sub.id, origin: window.location.origin })}
+                              disabled={approveAndPublish.isPending}
                             >
-                              Approve
+                              {approveAndPublish.isPending ? "Publishing..." : "Approve & Publish"}
                             </Button>
                             <Button
                               size="sm"
@@ -718,11 +729,11 @@ export default function PartnerSubmissions() {
                   </Button>
                   <Button
                     className="bg-green-600 hover:bg-green-700 text-white"
-                    onClick={() => approve.mutate({ id: selected.id })}
-                    disabled={approve.isPending}
+                    onClick={() => approveAndPublish.mutate({ id: selected.id, origin: window.location.origin })}
+                    disabled={approveAndPublish.isPending}
                   >
                     <CheckCircle2 className="h-4 w-4 mr-1.5" />
-                    {approve.isPending ? "Approving..." : "Approve"}
+                    {approveAndPublish.isPending ? "Publishing..." : "Approve & Publish"}
                   </Button>
                 </>
               )}
