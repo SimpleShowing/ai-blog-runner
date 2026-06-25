@@ -815,7 +815,6 @@ export default function PartnerSubmissions() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
     </>
   );
 }
